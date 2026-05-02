@@ -1,0 +1,20 @@
+  if (useLLM) {
+    // Sequential — local LLMs can't handle concurrent requests well
+    generatedSections = [];
+    for (let idx = 0; idx < sections.length; idx++) {
+      const section = sections[idx];
+      let questions: Question[];
+      try {
+        questions = await generateQuestionsWithLLM(pdfText, section, idx, subject);
+      } catch (err) {
+        console.warn(`LLM failed for "${section.name}", using template:`, err);
+        questions = templateQuestions(section, idx, keywords, topics, concepts, sentences, definitions, facts, subject);
+      }
+      generatedSections.push({
+        name: section.name,
+        instructions: getInstructions(section),
+        type: section.type,
+        questions,
+      });
+    }
+  }
