@@ -28,8 +28,7 @@ export default defineConfig({
   },
   assetsInclude: ['**/*.svg', '**/*.csv'],
   optimizeDeps: {
-    // Pre-bundle pdfjs so Vite doesn't try to transform the worker at runtime
-    include: ['pdfjs-dist'],
+    include: ['pdfjs-dist', 'tesseract.js'],
   },
   worker: {
     // Use module format so the PDF worker ESM file loads correctly

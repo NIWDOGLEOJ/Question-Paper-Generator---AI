@@ -53,6 +53,7 @@ export function Generate() {
   ]);
   const [stage, setStage] = useState<Stage>("extracting");
   const [isGenerating, setIsGenerating] = useState(false);
+  const [ocrActive, setOcrActive] = useState(false);
 
   // ── File helpers ──
   const acceptFile = useCallback((f: File) => {
@@ -91,7 +92,11 @@ export function Generate() {
 
     try {
       setStage("extracting");
-      const pdfText = await pdfService.extractTextFromPDF(file);
+      const pdfText = await pdfService.extractTextFromPDF(file, (msg) => {
+        console.log('[extraction]', msg);
+        // Show OCR hint in UI if we detect it
+        if (msg.toLowerCase().includes('ocr')) setOcrActive(true);
+      });
 
       setStage("analysing");
       // Yield to browser so the UI updates before the sync analysis runs
@@ -340,7 +345,9 @@ export function Generate() {
                     {STAGE_LABELS[stage]}
                   </h3>
                   <p className="text-sm text-[#94B49C] mt-1 max-w-xs">
-                    {stage === "extracting" && "Reading and parsing your PDF pages in parallel…"}
+                    {stage === "extracting" && (ocrActive
+                      ? "Running OCR on scanned pages — this takes a few minutes…"
+                      : "Reading and parsing your PDF pages in parallel…")}
                     {stage === "analysing"  && "Identifying keywords, topics and key concepts…"}
                     {stage === "generating" && (lmEnabled
                       ? "LM Studio is crafting intelligent questions from the content…"
