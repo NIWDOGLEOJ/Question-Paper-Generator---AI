@@ -1,4 +1,35 @@
-import { Section, Question } from './pdfService';
+import { Section, Question, SubjectType } from './pdfService';
+
+// ── Subject-specific prompt additions for STEM ───────────────────────────
+const STEM_PROMPT: Record<Exclude<SubjectType,'general'>, string> = {
+  physics: `SUBJECT-SPECIFIC RULES (Physics):
+- Prefer questions about laws, principles, and their mathematical expressions.
+- Include questions asking for SI units where relevant (e.g. "What is the SI unit of force?").
+- For Short Answer and Essay: include "State and prove", "Derive the expression for", or "Describe an experiment to determine" style questions.
+- MCQ distractors should use plausible but incorrect physical quantities or units.
+- Do NOT invent numerical values not present in the text; ask conceptual questions about numbers that appear.`,
+
+  chemistry: `SUBJECT-SPECIFIC RULES (Chemistry):
+- Include questions on chemical reactions, bonding, and molecular properties present in the text.
+- For Short Answer: include "Write the balanced equation for", "Define and give an example of", "Explain the mechanism of".
+- For Essay: use "Describe the preparation and properties of", "Discuss with equations".
+- MCQ options should use chemically plausible alternatives (e.g. wrong oxidation states, wrong products).
+- Do NOT invent chemical formulas or reactions not present in the text.`,
+
+  math: `SUBJECT-SPECIFIC RULES (Mathematics):
+- Prefer questions that require applying a theorem, rule, or formula mentioned in the text.
+- For Short Answer: include "Solve", "Prove that", "Find the value of", "Show that", "Simplify".
+- For Essay: use "Derive the general formula for", "Prove the following theorem", "Apply the method of".
+- MCQ options should use common calculation errors as distractors (e.g. sign errors, wrong formula variants).
+- Focus on procedural AND conceptual understanding.`,
+
+  biology: `SUBJECT-SPECIFIC RULES (Biology):
+- Include questions about processes, structures, and functions described in the text.
+- For Short Answer: include "Describe the role of", "Explain the process of", "Distinguish between".
+- For Essay: use "Describe with diagrams", "Explain the significance of", "Compare and contrast".
+- MCQ distractors should be anatomically or functionally plausible alternatives.
+- Include diagram-based questions where relevant (describe what a diagram would show).`,
+};
 
 export interface LMStudioConfig {
   enabled: boolean;
@@ -72,37 +103,50 @@ function samplePdfText(pdfText: string, maxChars: number): string {
   );
 }
 
+// ── Bloom's level guidance injected into each prompt ──
+const BLOOMS_PROMPT: Record<string, { level: string; description: string; exampleVerbs: string }> = {
+  Easy:   { level: "Remember / Understand", description: "recall facts, define terms, describe from memory",       exampleVerbs: "Define, List, Identify, Name, State, Describe, Recall, Summarise" },
+  Medium: { level: "Apply / Analyse",        description: "apply to a context, explain relationships, break down", exampleVerbs: "Explain, Compare, Classify, Differentiate, Apply, Examine, Illustrate, Solve" },
+  Hard:   { level: "Evaluate / Create",      description: "judge evidence, assess claims, justify positions",      exampleVerbs: "Evaluate, Justify, Critique, Assess, Construct, Synthesise, Design, Formulate" },
+};
+
 // ── Build a tight, well-structured prompt per question type ──
-function buildPrompt(pdfSample: string, section: Section, subject: string): string {
+function buildPrompt(pdfSample: string, section: Section, subject: string, subjectType: SubjectType = 'general'): string {
   const { count, type, difficulty, marks } = section;
-  const typeLC = type.toLowerCase();
+  const bloom     = BLOOMS_PROMPT[difficulty] ?? BLOOMS_PROMPT.Medium;
+  const typeLC    = type.toLowerCase();
+  const stemBlock = subjectType !== 'general' ? '\n\n' + STEM_PROMPT[subjectType as Exclude<SubjectType,'general'>] : '';
 
   let format = '';
   let example = '';
 
   if (typeLC.includes('multiple choice') || typeLC.includes('mcq')) {
-    format  = 'Numbered list. Each question followed by exactly 4 options on separate lines prefixed A) B) C) D).';
-    example = `1. What is the main function of X?\nA) Option one\nB) Option two\nC) Option three\nD) Option four`;
+    format  = 'Numbered list. Each question: question text, then exactly 4 options (A) B) C) D)), then "Answer: X" (the correct letter only).';
+    example = `1. What is the main function of X?\nA) Option one\nB) Option two\nC) Option three\nD) Option four\nAnswer: A\n\n2. Which best describes Y?\nA) Desc one\nB) Desc two\nC) Desc three\nD) Desc four\nAnswer: C`;
   } else if (typeLC.includes('true') || typeLC.includes('false')) {
-    format  = 'Numbered list of statements only. No answers, no explanations.';
-    example = `1. X is defined as Y.\n2. The process of Z involves W.`;
+    format  = 'Numbered list. Each item: a factual statement, then "Answer: True" or "Answer: False" on the next line.';
+    example = `1. X is defined as Y.\nAnswer: True\n\n2. The process of Z involves only W.\nAnswer: False`;
   } else if (typeLC.includes('short')) {
-    format  = 'Numbered list of questions only. Each question should require a 2–4 sentence answer.';
-    example = `1. Define X and explain its significance.\n2. Describe the role of Y in Z.`;
+    format  = 'Numbered list. Each item: question text, then "Answer:" followed by a concise 2–3 sentence model answer.';
+    example = `1. Define X and explain its significance.\nAnswer: X is the process of... It is significant because it enables...\n\n2. Describe the role of Y in Z.\nAnswer: Y functions as... In Z, it is responsible for...`;
   } else if (typeLC.includes('essay') || typeLC.includes('long')) {
-    format  = 'Numbered list of essay prompts only.';
-    example = `1. Critically analyse the concept of X and its impact on Y.\n2. Discuss the relationship between A and B with examples.`;
+    format  = 'Numbered list. Each item: essay prompt, then "Answer:" listing 4–5 key points a strong answer must cover.';
+    example = `1. Critically analyse the concept of X and its impact on Y.\nAnswer: Key points: (1) Define X and its scope. (2) Historical context. (3) Relationship to Y. (4) Advantages and limitations. (5) Real-world examples.\n\n2. Discuss A and B with examples.\nAnswer: Key points: (1) Define A and B. (2) Compare their mechanisms. (3) Provide two concrete examples. (4) Analyse implications.`;
   } else if (typeLC.includes('fill')) {
-    format  = 'Numbered list. Use __________ for the blank. One blank per sentence.';
-    example = `1. The process of X is primarily used for __________.\n2. __________ is defined as the study of Y.`;
+    format  = 'Numbered list. Use __________ for the blank (one blank per sentence). Then "Answer: [the missing word or phrase]".';
+    example = `1. The process of X is primarily used for __________.\nAnswer: energy production\n\n2. __________ is defined as the study of Y.\nAnswer: Biology`;
   } else {
-    format  = 'Numbered list of questions.';
-    example = `1. Explain X.\n2. Describe Y.`;
+    format  = 'Numbered list. Each item: question, then "Answer:" with a concise model answer.';
+    example = `1. Explain X.\nAnswer: X refers to...\n\n2. Describe Y.\nAnswer: Y is characterised by...`;
   }
 
   return `You are an expert exam paper writer for ${subject}.
-Using ONLY the textbook content provided, write exactly ${count} ${difficulty} ${type} questions.
+Using ONLY the textbook content provided, write exactly ${count} ${type} questions.
 Each question is worth ${marks} mark(s).
+
+COGNITIVE LEVEL (Bloom's Taxonomy): ${difficulty} — ${bloom.level}
+Target: ${bloom.description}.
+Preferred question verbs: ${bloom.exampleVerbs}.${stemBlock}
 
 TEXTBOOK CONTENT:
 ${pdfSample}
@@ -116,7 +160,9 @@ ${example}
 RULES:
 - Write exactly ${count} questions. No more, no less.
 - Base every question directly on the provided content.
-- Do NOT include answers, answer keys, or explanations.
+- Match the cognitive level: ${bloom.level}. Use the preferred verbs listed above.
+- Include an "Answer:" line for EVERY question exactly as shown in the format above.
+- For MCQ: the Answer line must be just the letter (e.g., "Answer: B"). Do not repeat the option text.
 - Do NOT add section headers, preamble, or closing remarks.
 - Start immediately with "1."`;
 }
@@ -172,6 +218,21 @@ async function callLLM(prompt: string, config: LMStudioConfig): Promise<string> 
   }
 }
 
+// ── Extract the answer text from a raw question block ──
+function extractAnswer(block: string): string | undefined {
+  const idx = block.search(/\bAnswer:/i);
+  if (idx === -1) return undefined;
+  const after = block.slice(idx + 7).trim(); // 7 = "Answer:".length
+  // Join multi-line answers, strip any trailing numbered item that leaked in
+  const answer = after
+    .split('\n')
+    .map(l => l.trim())
+    .filter(Boolean)
+    .join(' ')
+    .trim();
+  return answer || undefined;
+}
+
 // ── Robust parser — handles many LLM output variations ──
 function parseQuestions(raw: string, section: Section, sectionIdx: number): Question[] {
   const { type, count, marks } = section;
@@ -190,7 +251,9 @@ function parseQuestions(raw: string, section: Section, sectionIdx: number): Ques
   for (let i = 0; i < blocks.length && questions.length < count; i++) {
     const id    = sectionIdx * 100 + questions.length + 1;
     const block = blocks[i];
-    const lines = block.split('\n').map(l => l.trim()).filter(Boolean);
+    // Strip answer section from lines so it doesn't pollute question text / options
+    const blockNoAnswer = block.replace(/\bAnswer:[\s\S]*/i, '').trim();
+    const lines = blockNoAnswer.split('\n').map(l => l.trim()).filter(Boolean);
 
     if (!lines.length) continue;
 
@@ -198,8 +261,8 @@ function parseQuestions(raw: string, section: Section, sectionIdx: number): Ques
       // First line(s) before A) are the question text
       const optionStart = lines.findIndex(l => /^[A-Da-d][\)\.]\s+/.test(l));
       if (optionStart === -1) {
-        // No options found — still save the question text
-        questions.push({ id, text: lines[0], marks });
+        const answerText = extractAnswer(block);
+        questions.push({ id, text: lines[0], marks, ...(answerText && { answer: answerText }) });
         continue;
       }
       const questionText = lines.slice(0, optionStart).join(' ').trim();
@@ -208,13 +271,38 @@ function parseQuestions(raw: string, section: Section, sectionIdx: number): Ques
         .filter(l => /^[A-Da-d][\)\.]\s+/.test(l))
         .map(l => l.replace(/^[A-Da-d][\)\.]\s+/, '').trim())
         .slice(0, 4);
+
+      // Map "Answer: B" → "B) Option text"
+      const answerRaw = extractAnswer(block);
+      let answer: string | undefined;
+      if (answerRaw) {
+        const letterMatch = answerRaw.match(/^([A-Da-d])[\).]?\s*/);
+        if (letterMatch && options.length > 0) {
+          const letterIdx = letterMatch[1].toUpperCase().charCodeAt(0) - 65; // A=0, B=1 …
+          answer = options[letterIdx]
+            ? `${String.fromCharCode(65 + letterIdx)}) ${options[letterIdx]}`
+            : answerRaw;
+        } else {
+          answer = answerRaw;
+        }
+      }
+
       if (options.length >= 2) {
-        questions.push({ id, text: questionText || lines[0], options, marks });
+        questions.push({ id, text: questionText || lines[0], options, marks, ...(answer && { answer }) });
       }
     } else if (isTF) {
-      questions.push({ id, text: lines.join(' '), options: ['True', 'False'], marks });
+      const answerText = extractAnswer(block);
+      questions.push({
+        id, text: blockNoAnswer.replace(/^[A-Da-d][\)\.]\s+/gm, '').replace(/\s+/g, ' ').trim(),
+        options: ['True', 'False'], marks,
+        ...(answerText && { answer: answerText }),
+      });
     } else {
-      questions.push({ id, text: lines.join(' '), marks });
+      const answerText = extractAnswer(block);
+      questions.push({
+        id, text: lines.join(' '), marks,
+        ...(answerText && { answer: answerText }),
+      });
     }
   }
 
@@ -224,7 +312,7 @@ function parseQuestions(raw: string, section: Section, sectionIdx: number): Ques
     const fallbackLines = raw
       .split('\n')
       .map(l => l.replace(/^(?:Q(?:uestion)?\s*)?\d+[\.\)]\s*/i, '').trim())
-      .filter(l => l.length > 15 && !/^[A-Da-d][\)\.]\s+/.test(l));
+      .filter(l => l.length > 15 && !/^[A-Da-d][\)\.]\s+/.test(l) && !/\bAnswer:/i.test(l));
 
     for (let i = questions.length; i < count && i < fallbackLines.length; i++) {
       const id = sectionIdx * 100 + i + 1;
@@ -242,16 +330,17 @@ export async function generateQuestionsWithLLM(
   pdfText: string,
   section: Section,
   sectionIdx: number,
-  subject: string
+  subject: string,
+  subjectType: SubjectType = 'general',
 ): Promise<Question[]> {
   const config = getLMStudioConfig();
   if (!config.enabled) throw new Error('LM Studio is not enabled');
   if (!config.model)   throw new Error('No model selected. Please pick a model in LM Studio Settings.');
 
   const sample = samplePdfText(pdfText, config.contextChars);
-  const prompt = buildPrompt(sample, section, subject);
+  const prompt = buildPrompt(sample, section, subject, subjectType);
 
-  console.log(`[LLM] Section "${section.name}" — ${section.count}× ${section.type}`);
+  console.log(`[LLM] Section "${section.name}" — ${section.count}× ${section.type} [${subjectType}]`);
   const t0  = performance.now();
   const raw = await callLLM(prompt, config);
   console.log(`[LLM] Response in ${((performance.now() - t0) / 1000).toFixed(1)}s — ${raw.length} chars`);

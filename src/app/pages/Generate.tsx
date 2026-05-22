@@ -1,27 +1,35 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useNavigate } from "react-router";
 import { Label } from "../components/ui/label";
 import {
   Plus, Trash2, Wand2, CheckCircle2, File, UploadCloud,
-  ArrowRight, ArrowLeft, Cpu, Sparkles, FileText, Zap,
+  ArrowRight, ArrowLeft, Cpu, Sparkles, FileText, Zap, AlertTriangle, ExternalLink,
+  BookTemplate, Save, X, LayoutTemplate,
 } from "lucide-react";
 import { toast } from "sonner";
 import * as pdfService from "../services/pdfService";
 import { getLMStudioConfig } from "../services/lmStudioService";
+import {
+  getTemplates, saveTemplate, deleteTemplate,
+  createTemplate, BUILTIN_TEMPLATES,
+  type PaperTemplate,
+} from "../services/templateService";
+import * as sourceService from "../services/sourceService";
+import type { SourceMaterial } from "../services/sourceService";
 
 interface Section {
-  id: string;
-  name: string;
-  type: string;
-  count: number;
-  marks: number;
+  id:         string;
+  name:       string;
+  type:       string;
+  count:      number;
+  marks:      number;
   difficulty: string;
 }
 
 const STEPS = [
-  { id: 1, label: "Upload Source" },
+  { id: 1, label: "Upload Source"   },
   { id: 2, label: "Define Structure" },
-  { id: 3, label: "Generate" },
+  { id: 3, label: "Generate"        },
 ];
 
 type Stage = "extracting" | "analysing" | "generating" | "done";
@@ -40,25 +48,220 @@ const STAGE_PROGRESS: Record<Stage, number> = {
   done:       100,
 };
 
+// ── Small modal for naming a new template ──
+function SaveTemplateModal({
+  onSave,
+  onClose,
+}: {
+  onSave: (name: string) => void;
+  onClose: () => void;
+}) {
+  const [name, setName] = useState("");
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center"
+      style={{ background: "rgba(0,0,0,0.55)", backdropFilter: "blur(4px)" }}>
+      <div className="fm-glass rounded-2xl p-6 w-full max-w-sm shadow-2xl space-y-4 mx-4">
+        <div className="flex items-center justify-between">
+          <h3 className="text-base font-bold text-[#D5E2D6]" style={{ fontFamily: "'Playfair Display',serif" }}>
+            Save as Template
+          </h3>
+          <button onClick={onClose} className="text-[#527D6F] hover:text-[#94B49C]">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+        <p className="text-xs text-[#94B49C]">
+          This saves the current section structure so you can reuse it in future papers.
+        </p>
+        <div>
+          <Label className="text-xs font-semibold text-[#94B49C] mb-1.5 block tracking-wide uppercase">
+            Template Name
+          </Label>
+          <input
+            autoFocus
+            value={name}
+            onChange={e => setName(e.target.value)}
+            onKeyDown={e => { if (e.key === "Enter" && name.trim()) onSave(name.trim()); }}
+            placeholder="e.g. Standard MCQ Exam"
+            className="fm-input w-full h-9 rounded-lg px-3 text-sm"
+          />
+        </div>
+        <div className="flex gap-2 justify-end">
+          <button onClick={onClose}
+            className="px-4 py-2 rounded-xl text-sm font-medium text-[#94B49C] hover:bg-[rgba(82,125,111,0.1)] transition-all">
+            Cancel
+          </button>
+          <button
+            disabled={!name.trim()}
+            onClick={() => name.trim() && onSave(name.trim())}
+            className="fm-btn-primary flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold
+              disabled:opacity-40 disabled:cursor-not-allowed">
+            <Save className="w-3.5 h-3.5" /> Save
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Template picker panel ──
+function TemplatePicker({
+  onApply,
+  onClose,
+}: {
+  onApply: (tpl: PaperTemplate | Omit<PaperTemplate, 'id' | 'createdAt'>) => void;
+  onClose: () => void;
+}) {
+  const [userTemplates, setUserTemplates] = useState(getTemplates());
+
+  const handleDelete = (id: string) => {
+    deleteTemplate(id);
+    setUserTemplates(getTemplates());
+    toast.success("Template deleted");
+  };
+
+  const allBuiltin = BUILTIN_TEMPLATES.map((t, i) => ({ ...t, id: `builtin-${i}`, createdAt: '' }));
+  const all        = [...allBuiltin, ...userTemplates];
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center"
+      style={{ background: "rgba(0,0,0,0.55)", backdropFilter: "blur(4px)" }}>
+      <div className="fm-glass rounded-2xl p-6 w-full max-w-lg shadow-2xl mx-4 space-y-4 max-h-[80vh] flex flex-col">
+
+        {/* Header */}
+        <div className="flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-2">
+            <LayoutTemplate className="w-4 h-4 text-[#94B49C]" />
+            <h3 className="text-base font-bold text-[#D5E2D6]" style={{ fontFamily: "'Playfair Display',serif" }}>
+              Choose a Template
+            </h3>
+          </div>
+          <button onClick={onClose} className="text-[#527D6F] hover:text-[#94B49C]">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        <p className="text-xs text-[#94B49C] shrink-0">
+          Applying a template replaces your current sections. Paper title and subject are not affected.
+        </p>
+
+        {/* List */}
+        <div className="overflow-y-auto space-y-2 pr-1">
+          {all.map((tpl) => {
+            const isBuiltin = tpl.id.startsWith("builtin-");
+            const totalQ    = tpl.sections.reduce((a, s) => a + s.count, 0);
+            const totalM    = tpl.sections.reduce((a, s) => a + s.count * s.marks, 0);
+            return (
+              <div key={tpl.id}
+                className="group flex items-start gap-3 p-3 rounded-xl cursor-pointer transition-all
+                  hover:bg-[rgba(82,125,111,0.12)]"
+                style={{ border: "1px solid rgba(148,180,156,0.1)" }}
+                onClick={() => { onApply(tpl); onClose(); }}
+              >
+                <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 mt-0.5"
+                  style={{ background: "rgba(82,125,111,0.18)" }}>
+                  <LayoutTemplate className="w-4 h-4 text-[#94B49C]" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm font-semibold text-[#D5E2D6] truncate">{tpl.name}</p>
+                    {isBuiltin && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded font-medium text-[#527D6F]"
+                        style={{ background: "rgba(82,125,111,0.15)" }}>built-in</span>
+                    )}
+                  </div>
+                  <p className="text-xs text-[#527D6F] mt-0.5">
+                    {tpl.sections.length} section{tpl.sections.length !== 1 ? 's' : ''} ·{' '}
+                    {totalQ} questions · {totalM} marks · {tpl.duration} min
+                  </p>
+                  <div className="flex flex-wrap gap-1 mt-1.5">
+                    {tpl.sections.map((s, i) => (
+                      <span key={i}
+                        className="text-[10px] px-2 py-0.5 rounded-full text-[#94B49C]"
+                        style={{ background: "rgba(82,125,111,0.12)" }}>
+                        {s.name}: {s.count}× {s.type}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Delete (user templates only) */}
+                {!isBuiltin && (
+                  <button
+                    onClick={e => { e.stopPropagation(); handleDelete(tpl.id); }}
+                    className="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 rounded-lg
+                      text-[#527D6F] hover:text-[#c0504a] hover:bg-[rgba(192,80,74,0.1)]"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Main Generate page ──
 export function Generate() {
   const navigate = useNavigate();
-  const [step, setStep] = useState(1);
-  const [file, setFile] = useState<File | null>(null);
+  const [step, setStep]           = useState(1);
+  const [file, setFile]           = useState<File | null>(null);
+  const [preloadedSource, setPreloadedSource] = useState<SourceMaterial | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [paperTitle, setPaperTitle] = useState("");
-  const [subject, setSubject] = useState("");
-  const [duration, setDuration] = useState("120");
-  const [sections, setSections] = useState<Section[]>([
+  const [subject, setSubject]     = useState("");
+  const [duration, setDuration]   = useState("120");
+  const [sections, setSections]   = useState<Section[]>([
     { id: "1", name: "Section A", type: "Multiple Choice", count: 10, marks: 1, difficulty: "Easy" },
   ]);
-  const [stage, setStage] = useState<Stage>("extracting");
+  const [stage, setStage]         = useState<Stage>("extracting");
   const [isGenerating, setIsGenerating] = useState(false);
   const [ocrActive, setOcrActive] = useState(false);
 
+  // Page range state
+  const [pageCount, setPageCount]           = useState<number | null>(null);
+  const [startPage, setStartPage]           = useState(1);
+  const [endPage, setEndPage]               = useState(1);
+  const [loadingPageCount, setLoadingPageCount] = useState(false);
+
+  // Template UI state
+  const [showPicker, setShowPicker]     = useState(false);
+  const [showSaveModal, setShowSaveModal] = useState(false);
+
+  // ── Check for pre-loaded source from Source Material page ──
+  useEffect(() => {
+    const srcId = sessionStorage.getItem('qpg_preload_source');
+    if (srcId) {
+      const src = sourceService.getSource(srcId);
+      if (src) {
+        setPreloadedSource(src);
+        setSubject(src.subject || '');
+        // Auto-advance to step 2 since source is already loaded
+        setStep(2);
+      }
+      sessionStorage.removeItem('qpg_preload_source');
+    }
+  }, []);
+
   // ── File helpers ──
-  const acceptFile = useCallback((f: File) => {
-    if (f.type === "application/pdf") { setFile(f); toast.success(`"${f.name}" ready`); }
-    else toast.error("Please upload a PDF file");
+  const acceptFile = useCallback(async (f: File) => {
+    if (f.type !== "application/pdf") { toast.error("Please upload a PDF file"); return; }
+    setFile(f);
+    setPageCount(null);
+    setLoadingPageCount(true);
+    try {
+      const count = await pdfService.getPDFPageCount(f);
+      setPageCount(count);
+      setStartPage(1);
+      setEndPage(count);
+    } catch {
+      // Non-fatal — user can still generate without a range picker
+    } finally {
+      setLoadingPageCount(false);
+    }
+    toast.success(`"${f.name}" ready`);
   }, []);
 
   const onInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -84,22 +287,54 @@ export function Generate() {
   const updateSection = (id: string, field: keyof Section, value: any) =>
     setSections(s => s.map(x => x.id === id ? { ...x, [field]: value } : x));
 
+  // ── Apply template ──
+  const applyTemplate = (tpl: Pick<PaperTemplate, 'sections' | 'duration'>) => {
+    setSections(tpl.sections.map((s, i) => ({
+      id:         `tpl-${Date.now()}-${i}`,
+      name:       s.name,
+      type:       s.type,
+      count:      s.count,
+      marks:      s.marks,
+      difficulty: s.difficulty,
+    })));
+    setDuration(tpl.duration);
+    toast.success("Template applied!");
+  };
+
+  // ── Save current as template ──
+  const handleSaveTemplate = (name: string) => {
+    const tpl = createTemplate(name, duration, sections);
+    saveTemplate(tpl);
+    setShowSaveModal(false);
+    toast.success(`Template "${name}" saved!`);
+  };
+
   // ── Generate ──
   const handleGenerate = async () => {
-    if (!file) { toast.error("Please upload a PDF first"); return; }
+    if (!file && !preloadedSource) { toast.error("Please upload a PDF first"); return; }
     setIsGenerating(true);
     setStep(3);
 
     try {
-      setStage("extracting");
-      const pdfText = await pdfService.extractTextFromPDF(file, (msg) => {
-        console.log('[extraction]', msg);
-        // Show OCR hint in UI if we detect it
-        if (msg.toLowerCase().includes('ocr')) setOcrActive(true);
-      });
+      let pdfText: string;
+      let fileName: string;
+
+      if (preloadedSource) {
+        // Use stored text — skip re-extraction
+        setStage("extracting");
+        pdfText  = preloadedSource.text;
+        fileName = preloadedSource.name;
+        await new Promise(r => setTimeout(r, 300));
+      } else {
+        setStage("extracting");
+        pdfText = await pdfService.extractTextFromPDF(file!, (msg) => {
+          console.log('[extraction]', msg);
+          if (msg.toLowerCase().includes('ocr')) setOcrActive(true);
+        }, startPage, endPage);
+        fileName = file!.name;
+      }
 
       setStage("analysing");
-      // Yield to browser so the UI updates before the sync analysis runs
       await new Promise(r => setTimeout(r, 30));
 
       setStage("generating");
@@ -107,29 +342,39 @@ export function Generate() {
         pdfText,
         sections,
         paperTitle || "Generated Question Paper",
-        subject || "Subject",
+        subject    || "Subject",
         `${duration} Minutes`,
-        file.name,
+        fileName,
       );
 
       setStage("done");
       pdfService.savePaper(paper);
+
+      // Link paper back to source library entry
+      if (preloadedSource) {
+        sourceService.linkPaperToSource(preloadedSource.id, paper.id);
+      }
+
       toast.success("Question paper generated!");
       setTimeout(() => navigate(`/paper/${paper.id}`), 600);
 
     } catch (err) {
       setIsGenerating(false);
-      setStep(2);
+      setStep(preloadedSource ? 2 : 2);
       toast.error(err instanceof Error ? err.message : "Generation failed. Please try again.");
     }
   };
 
-  const totalQ = sections.reduce((a, s) => a + s.count, 0);
-  const totalM = sections.reduce((a, s) => a + s.count * s.marks, 0);
+  const totalQ    = sections.reduce((a, s) => a + s.count, 0);
+  const totalM    = sections.reduce((a, s) => a + s.count * s.marks, 0);
   const lmEnabled = getLMStudioConfig().enabled;
 
   return (
     <div className="max-w-3xl mx-auto px-6 py-10 fm-fadein">
+
+      {/* Modals */}
+      {showPicker    && <TemplatePicker  onApply={applyTemplate} onClose={() => setShowPicker(false)} />}
+      {showSaveModal && <SaveTemplateModal onSave={handleSaveTemplate} onClose={() => setShowSaveModal(false)} />}
 
       {/* ── Step progress ── */}
       <div className="flex items-center gap-2 mb-10">
@@ -171,6 +416,21 @@ export function Generate() {
               </h2>
               <p className="text-sm text-[#94B49C] mt-1">Upload a textbook PDF — the AI will read it and craft tailored questions.</p>
             </div>
+            {/* Pre-loaded source banner */}
+            {preloadedSource && (
+              <div className="flex items-center gap-3 px-4 py-3 rounded-xl"
+                style={{ background: "rgba(82,125,111,0.12)", border: "1px solid rgba(148,180,156,0.25)" }}>
+                <FileText className="w-5 h-5 text-[#94B49C] shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-[#D5E2D6] truncate">{preloadedSource.title}</p>
+                  <p className="text-xs text-[#527D6F]">Loaded from your library · no re-upload needed</p>
+                </div>
+                <button onClick={() => { setPreloadedSource(null); }}
+                  className="text-xs text-[#527D6F] hover:text-[#c0504a] transition-colors">
+                  Change
+                </button>
+              </div>
+            )}
 
             <div
               className={`fm-dropzone rounded-xl px-6 py-14 flex flex-col items-center justify-center text-center cursor-pointer
@@ -188,10 +448,8 @@ export function Generate() {
                   </div>
                   <p className="font-semibold text-[#D5E2D6] text-sm">{file.name}</p>
                   <p className="text-xs text-[#527D6F]">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
-                  <button onClick={e => { e.stopPropagation(); setFile(null); }}
-                    className="text-xs text-[#c0504a] hover:underline mt-1">
-                    Remove file
-                  </button>
+                  <button onClick={e => { e.stopPropagation(); setFile(null); setPageCount(null); }}
+                    className="text-xs text-[#c0504a] hover:underline mt-1">Remove file</button>
                 </div>
               ) : (
                 <>
@@ -203,10 +461,114 @@ export function Generate() {
               )}
             </div>
 
+            {/* ── Page range selector (shown once page count is known) ── */}
+            {file && (
+              <div className="rounded-xl px-4 py-4 space-y-3 fm-fadein"
+                style={{ background: "rgba(82,125,111,0.07)", border: "1px solid rgba(148,180,156,0.15)" }}>
+
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <FileText className="w-3.5 h-3.5 text-[#527D6F]" />
+                    <span className="text-xs font-semibold text-[#94B49C] uppercase tracking-wide">
+                      Page Range
+                    </span>
+                    {loadingPageCount && (
+                      <span className="text-xs text-[#527D6F]">Detecting…</span>
+                    )}
+                    {pageCount && !loadingPageCount && (
+                      <span className="text-xs text-[#527D6F]">{pageCount} pages total</span>
+                    )}
+                  </div>
+
+                  {/* Quick-select presets */}
+                  {pageCount && !loadingPageCount && (
+                    <div className="flex gap-1.5">
+                      {[
+                        { label: "All",    s: 1,                          e: pageCount },
+                        { label: "First½", s: 1,                          e: Math.ceil(pageCount / 2) },
+                        { label: "Last½",  s: Math.floor(pageCount / 2) + 1, e: pageCount },
+                      ].map(p => (
+                        <button key={p.label}
+                          onClick={() => { setStartPage(p.s); setEndPage(p.e); }}
+                          className={`px-2.5 py-1 rounded-lg text-[10px] font-semibold transition-all
+                            ${startPage === p.s && endPage === p.e
+                              ? "bg-[rgba(82,125,111,0.35)] text-[#D5E2D6]"
+                              : "text-[#527D6F] hover:bg-[rgba(82,125,111,0.15)]"}`}
+                          style={{ border: "1px solid rgba(148,180,156,0.2)" }}
+                        >
+                          {p.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Inputs row */}
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2 flex-1">
+                    <Label className="text-xs text-[#94B49C] shrink-0">From</Label>
+                    <input
+                      type="number" min={1} max={pageCount ?? 9999}
+                      value={startPage}
+                      disabled={!pageCount || loadingPageCount}
+                      onChange={e => {
+                        const v = Math.max(1, Math.min(parseInt(e.target.value) || 1, endPage));
+                        setStartPage(v);
+                      }}
+                      className="fm-input w-20 h-8 rounded-lg px-3 text-sm text-center
+                        disabled:opacity-40 disabled:cursor-not-allowed"
+                    />
+                  </div>
+
+                  {/* Visual range bar */}
+                  {pageCount && (
+                    <div className="flex-1 flex flex-col items-stretch gap-1">
+                      <div className="h-1.5 rounded-full overflow-hidden"
+                        style={{ background: "rgba(148,180,156,0.15)" }}>
+                        <div className="h-full rounded-full transition-all duration-200"
+                          style={{
+                            marginLeft:  `${((startPage - 1) / pageCount) * 100}%`,
+                            width:       `${((endPage - startPage + 1) / pageCount) * 100}%`,
+                            background:  "rgba(148,180,156,0.7)",
+                          }} />
+                      </div>
+                      <p className="text-center text-[10px] text-[#527D6F]">
+                        {endPage - startPage + 1} page{endPage - startPage + 1 !== 1 ? "s" : ""} selected
+                      </p>
+                    </div>
+                  )}
+
+                  <div className="flex items-center gap-2 flex-1 justify-end">
+                    <Label className="text-xs text-[#94B49C] shrink-0">To</Label>
+                    <input
+                      type="number" min={startPage} max={pageCount ?? 9999}
+                      value={endPage}
+                      disabled={!pageCount || loadingPageCount}
+                      onChange={e => {
+                        const v = Math.min(
+                          pageCount ?? 9999,
+                          Math.max(parseInt(e.target.value) || startPage, startPage),
+                        );
+                        setEndPage(v);
+                      }}
+                      className="fm-input w-20 h-8 rounded-lg px-3 text-sm text-center
+                        disabled:opacity-40 disabled:cursor-not-allowed"
+                    />
+                  </div>
+                </div>
+
+                {!pageCount && !loadingPageCount && (
+                  <p className="text-xs text-[#527D6F]">
+                    Could not detect page count — the full PDF will be used.
+                  </p>
+                )}
+              </div>
+            )}
+
             <div className="flex justify-end">
-              <button disabled={!file} onClick={() => setStep(2)}
+              <button disabled={!file && !preloadedSource} onClick={() => setStep(2)}
                 className={`fm-btn-primary flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-semibold
-                  ${!file ? "opacity-40 cursor-not-allowed" : ""}`}>
+                  ${!file && !preloadedSource ? "opacity-40 cursor-not-allowed" : ""}`}>
                 Next <ArrowRight className="w-4 h-4" />
               </button>
             </div>
@@ -216,20 +578,44 @@ export function Generate() {
         {/* ════ STEP 2 ════ */}
         {step === 2 && (
           <div className="fm-fadein space-y-7">
-            <div>
-              <h2 className="text-xl font-bold text-[#D5E2D6]" style={{ fontFamily: "'Playfair Display',serif" }}>
-                Paper Structure
-              </h2>
-              <p className="text-sm text-[#94B49C] mt-1">Name the paper, set duration, and add question sections.</p>
+
+            {/* Header row with template buttons */}
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-xl font-bold text-[#D5E2D6]" style={{ fontFamily: "'Playfair Display',serif" }}>
+                  Paper Structure
+                </h2>
+                <p className="text-sm text-[#94B49C] mt-1">Name the paper, set duration, and add question sections.</p>
+              </div>
+              <div className="flex gap-2 shrink-0">
+                <button
+                  onClick={() => setShowPicker(true)}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-[#94B49C]
+                    hover:bg-[rgba(82,125,111,0.12)] transition-all"
+                  style={{ border: "1px solid rgba(148,180,156,0.2)" }}
+                  title="Load a template"
+                >
+                  <LayoutTemplate className="w-3.5 h-3.5" /> Templates
+                </button>
+                <button
+                  onClick={() => setShowSaveModal(true)}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-[#94B49C]
+                    hover:bg-[rgba(82,125,111,0.12)] transition-all"
+                  style={{ border: "1px solid rgba(148,180,156,0.2)" }}
+                  title="Save current structure as template"
+                >
+                  <Save className="w-3.5 h-3.5" /> Save as Template
+                </button>
+              </div>
             </div>
 
             {/* Metadata */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pb-6"
               style={{ borderBottom: "1px solid rgba(148,180,156,0.12)" }}>
               {[
-                { label: "Paper Title", value: paperTitle, set: setPaperTitle, placeholder: "Mid-Term Exam" },
-                { label: "Subject",     value: subject,    set: setSubject,    placeholder: "Biology 101" },
-                { label: "Duration (min)", value: duration, set: setDuration,  placeholder: "120", type: "number" },
+                { label: "Paper Title",    value: paperTitle, set: setPaperTitle, placeholder: "Mid-Term Exam"  },
+                { label: "Subject",        value: subject,    set: setSubject,    placeholder: "Biology 101"    },
+                { label: "Duration (min)", value: duration,   set: setDuration,   placeholder: "120", type: "number" },
               ].map(f => (
                 <div key={f.label}>
                   <Label className="text-xs font-semibold text-[#94B49C] mb-1.5 block tracking-wide uppercase">{f.label}</Label>
@@ -240,9 +626,36 @@ export function Generate() {
               ))}
             </div>
 
+            {/* LM Studio status banner */}
+            {!lmEnabled && (
+              <div className="flex items-start gap-3 px-4 py-3 rounded-xl"
+                style={{ background: "rgba(192,80,74,0.08)", border: "1px solid rgba(192,80,74,0.25)" }}>
+                <AlertTriangle className="w-4 h-4 text-[#c0504a] shrink-0 mt-0.5" />
+                <div className="flex-1 text-sm text-[#c0504a]">
+                  <p className="font-semibold">LM Studio is disabled</p>
+                  <p className="text-xs mt-0.5 opacity-80">
+                    Questions will be generated using the built-in template engine — quality will be lower.
+                    Enable LM Studio in{" "}
+                    <a href="/settings" className="underline font-medium">Settings</a>{" "}
+                    for AI-generated questions.
+                  </p>
+                </div>
+              </div>
+            )}
+            {lmEnabled && (
+              <div className="flex items-center gap-3 px-4 py-3 rounded-xl"
+                style={{ background: "rgba(82,125,111,0.1)", border: "1px solid rgba(82,125,111,0.25)" }}>
+                <Cpu className="w-4 h-4 text-[#94B49C] shrink-0" />
+                <div className="text-sm text-[#94B49C]">
+                  <span className="font-semibold">LM Studio active</span>
+                  <span className="text-xs ml-2 opacity-70">— questions will be AI-generated from your PDF</span>
+                </div>
+              </div>
+            )}
+
             {/* Sections */}
             <div className="space-y-4">
-              {sections.map((s, i) => (
+              {sections.map((s) => (
                 <div key={s.id} className="fm-section-card p-4 rounded-xl">
                   <div className="flex items-center justify-between mb-4">
                     <span className="text-xs font-bold tracking-widest text-[#527D6F] uppercase">{s.name}</span>
@@ -326,20 +739,18 @@ export function Generate() {
           <div className="fm-fadein py-14 flex flex-col items-center text-center gap-8">
             {stage !== "done" ? (
               <>
-                {/* Animated icon */}
                 <div className="relative w-24 h-24">
                   <div className="absolute inset-0 rounded-full"
                     style={{ background: "rgba(82,125,111,0.1)", border: "2px solid rgba(82,125,111,0.2)" }} />
                   <div className="absolute inset-0 flex items-center justify-center">
-                    {stage === "extracting" ? <File className="w-9 h-9 text-[#94B49C] fm-float" />
-                     : stage === "analysing"  ? <Zap  className="w-9 h-9 text-[#94B49C] fm-float" />
-                                              : <Sparkles className="w-9 h-9 text-[#94B49C] fm-float" />}
+                    {stage === "extracting" ? <File      className="w-9 h-9 text-[#94B49C] fm-float" />
+                     : stage === "analysing" ? <Zap      className="w-9 h-9 text-[#94B49C] fm-float" />
+                                            : <Sparkles className="w-9 h-9 text-[#94B49C] fm-float" />}
                   </div>
                   <div className="absolute -inset-2 rounded-full border-2 border-transparent"
                     style={{ borderTopColor: "#94B49C", animation: "spin-ring 1s linear infinite" }} />
                 </div>
 
-                {/* Stage label */}
                 <div>
                   <h3 className="text-xl font-bold text-[#D5E2D6]" style={{ fontFamily: "'Playfair Display',serif" }}>
                     {STAGE_LABELS[stage]}
@@ -362,7 +773,6 @@ export function Generate() {
                   </div>
                 )}
 
-                {/* Stepped progress bar */}
                 <div className="w-72 space-y-2">
                   <div className="flex justify-between text-xs text-[#527D6F] font-medium">
                     <span>{STAGE_LABELS[stage]}</span>
@@ -378,8 +788,7 @@ export function Generate() {
                       <span key={l} className={
                         (stage === "extracting" && i === 0) ||
                         (stage === "analysing"  && i <= 1) ||
-                        (stage === "generating" && i <= 2)
-                          ? "text-[#94B49C]" : ""
+                        (stage === "generating" && i <= 2) ? "text-[#94B49C]" : ""
                       }>{l}</span>
                     ))}
                   </div>
