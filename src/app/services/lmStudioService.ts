@@ -301,6 +301,24 @@ function extractAnswer(block: string): string | undefined {
   return answer || undefined;
 }
 
+// ── Sanitize LLM LaTeX output to work with KaTeX ──
+function cleanLLMMath(raw: string): string {
+  // 1. Replace \( ... \) with $ ... $
+  let fixed = raw.replace(/\\\(([\s\S]*?)\\\)/g, '$$$1$$');
+  // 2. Replace \[ ... \] with $$ ... $$
+  fixed = fixed.replace(/\\\[([\s\S]*?)\\\]/g, '$$$$$1$$$$');
+
+  // 3. Fix single backslash newlines inside \begin{...} ... \end{...} environments
+  // LLMs often output "1 & 0 \ 0 & 1" instead of "1 & 0 \\ 0 & 1"
+  fixed = fixed.replace(/\\begin\{([a-zA-Z]+)\}([\s\S]*?)\\end\{\1\}/g, (match, type, content) => {
+    // Replace any \ that is NOT followed by another \ or a letter with \\
+    const fixedContent = content.replace(/(?<!\\)\\(?!\\|[a-zA-Z])/g, '\\\\');
+    return `\\begin{${type}}${fixedContent}\\end{${type}}`;
+  });
+
+  return fixed;
+}
+
 // ── Robust parser — handles many LLM output variations ──
 function parseQuestions(raw: string, section: Section, sectionIdx: number): Question[] {
   const { type, count, marks } = section;
@@ -406,15 +424,30 @@ export async function generateQuestionsWithLLM(
   if (!config.enabled) throw new Error('LM Studio is not enabled');
   if (!config.model)   throw new Error('No model selected. Please pick a model in LM Studio Settings.');
 
-  // Use STEM-aware sampler so equation-dense paragraphs are preferred
-  const sample = samplePdfText(pdfText, config.contextChars, subjectType);
-  const prompt = buildPrompt(sample, section, subject, subjectType, stemProblems);
-
   console.log(`[LLM] Section "${section.name}" — ${section.count}× ${section.type} [${subjectType}] stemProblems=${stemProblems.length}`);
-  const t0  = performance.now();
-  const raw = await callLLM(prompt, config);
+  
+  let raw = '';
+  const t0 = performance.now();
+  try {
+    const sample = samplePdfText(pdfText, config.contextChars, subjectType);
+    const prompt = buildPrompt(sample, section, subject, subjectType, stemProblems);
+    raw = await callLLM(prompt, config);
+  } catch (err: any) {
+    if (err.message && err.message.includes('Context Length Exceeded')) {
+      console.warn("[LLM] Context length exceeded! Retrying with 50% reduced context and 1024 max tokens...");
+      const fallbackConfig = { ...config, contextChars: Math.floor(config.contextChars / 2), maxTokens: 1024 };
+      const fallbackSample = samplePdfText(pdfText, fallbackConfig.contextChars, subjectType);
+      // Reduce stem problems from 10 to 5 to save space
+      const fallbackPrompt = buildPrompt(fallbackSample, section, subject, subjectType, stemProblems.slice(0, 5));
+      raw = await callLLM(fallbackPrompt, fallbackConfig);
+    } else {
+      throw err;
+    }
+  }
+  
   console.log(`[LLM] Response in ${((performance.now() - t0) / 1000).toFixed(1)}s — ${raw.length} chars`);
 
+  raw = cleanLLMMath(raw);
   const questions = parseQuestions(raw, section, sectionIdx);
   console.log(`[LLM] Parsed ${questions.length}/${section.count} questions`);
   return questions;
