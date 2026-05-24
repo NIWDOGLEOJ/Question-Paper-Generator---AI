@@ -1010,6 +1010,40 @@ export function savePaper(paper: Paper): void {
   _papers = [..._papers.filter(p => p.id !== paper.id), paper];
   dbPut('papers', paper).catch(e => console.error('[DB] savePaper failed:', e));
 }
+// ── Chapter Splitting ──
+export function splitTextIntoChapters(text: string, baseTitle: string): { title: string, text: string }[] {
+  // Matches "CHAPTER 1", "UNIT II", "MODULE 3: Kinematics"
+  const chapterRegex = /(?:^|\n\n)\s*(CHAPTER|UNIT|MODULE)\s+([0-9IVX]+(?:[\s\-:]+[A-Za-z0-9 ]{1,50})?)\b/gi;
+  
+  const matches = [...text.matchAll(chapterRegex)];
+  if (matches.length < 2) return [{ title: baseTitle, text }];
+  
+  const chapters: { title: string, text: string }[] = [];
+  
+  for (let i = 0; i < matches.length; i++) {
+    const match = matches[i];
+    const nextMatch = matches[i + 1];
+    
+    const startIndex = match.index!;
+    const endIndex = nextMatch ? nextMatch.index! : text.length;
+    
+    const chapterText = text.slice(startIndex, endIndex).trim();
+    
+    let header = match[0].trim().replace(/\s+/g, ' ');
+    header = header.replace(/^(CHAPTER|UNIT|MODULE)/i, (m) => m.charAt(0).toUpperCase() + m.slice(1).toLowerCase());
+    
+    const chapterTitle = `${baseTitle} - ${header}`;
+    
+    // Ignore extremely short chunks (usually Table of Contents artifacts)
+    if (chapterText.length > 500) {
+      chapters.push({ title: chapterTitle, text: chapterText });
+    }
+  }
+  
+  if (chapters.length < 2) return [{ title: baseTitle, text }];
+  return chapters;
+}
+
 export function getPapers(): Paper[] { return _papers; }
 export function getPaper(id: string): Paper | null {
   return _papers.find(p => p.id === id) ?? null;

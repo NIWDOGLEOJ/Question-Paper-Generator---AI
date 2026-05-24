@@ -143,10 +143,26 @@ export function SourceMaterialPage() {
         const m = msg.match(/(\d+)\s+page/i);
         if (m) pageCount = parseInt(m[1]);
       });
-      const src = sourceService.createSource(file, text, pageCount);
-      sourceService.saveSource(src);
+      
+      const baseTitle = file.name.replace(/\.pdf$/i, '').replace(/[-_]+/g, ' ').replace(/\b\w/g, c => c.toUpperCase()).trim();
+      const chapters = pdfService.splitTextIntoChapters(text, baseTitle);
+
+      if (chapters.length > 1) {
+        let savedCount = 0;
+        for (const ch of chapters) {
+          const src = sourceService.createSource(file, ch.text, pageCount);
+          src.title = ch.title; // Override title
+          sourceService.saveSource(src);
+          savedCount++;
+        }
+        toast.success(`"${baseTitle}" was split into ${savedCount} chapters!`);
+      } else {
+        const src = sourceService.createSource(file, text, pageCount);
+        sourceService.saveSource(src);
+        toast.success(`"${src.title}" added to your library!`);
+      }
+      
       load();
-      toast.success(`"${src.title}" added to your library!`);
     } catch (err) {
       console.error(err);
       toast.error("Failed to process PDF. Please try again.");
