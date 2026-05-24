@@ -166,7 +166,7 @@ function buildPrompt(
 SYMBOL / FORMULA HANDLING:
 - The source text was extracted from a PDF and may contain garbled or missing mathematical symbols.
 - If a formula or equation appears corrupted (e.g. "âˆ«" instead of "∫", "x ² " with extra spaces), infer the intended expression from context and write it correctly in your question.
-- Use standard text notation where needed: use ^ for superscripts (x^2), / for fractions (a/b), sqrt() for square roots, and spell out Greek letters (alpha, beta, theta, pi) if symbols won't render.
+- ALWAYS use standard LaTeX notation for mathematical equations, scientific units, and chemical formulas. Enclose inline math in single dollar signs (e.g. $E=mc^2$) and block equations in double dollar signs (e.g. $$ \int x^2 dx $$).
 - If you cannot confidently reconstruct a formula, ask a CONCEPTUAL question about the topic instead — do NOT invent numbers or equations that are not supported by the text.` : '';
 
   let format = '';

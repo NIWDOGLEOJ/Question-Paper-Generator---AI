@@ -9,6 +9,10 @@ import * as pdfService from "../services/pdfService";
 import { regenerateSection } from "../services/pdfService";
 import { exportPaperToPDF } from "../services/exportPdf";
 import { toast } from "sonner";
+import ReactMarkdown from "react-markdown";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
+import "katex/dist/katex.min.css";
 
 // ── Editable single-line or multi-line field ──
 function EditableText({
@@ -102,9 +106,13 @@ function EditableText({
   }
 
   return (
-    <span className={`group/e inline ${className}`}>
+    <span className={`group/e inline-block w-full ${className}`}>
       {value
-        ? <span style={{ fontFamily: multiline ? "'Georgia', serif" : undefined }}>{value}</span>
+        ? <span style={{ fontFamily: multiline ? "'Georgia', serif" : undefined }} className="math-markdown inline-block w-[calc(100%-24px)] align-top">
+            <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]} components={{ p: 'span' }}>
+              {value}
+            </ReactMarkdown>
+          </span>
         : <span className="text-gray-400 italic text-xs">{placeholder}</span>}
       <button onClick={open} title="Edit"
         className="ml-1.5 inline-flex items-center opacity-0 group-hover/e:opacity-100
@@ -147,7 +155,11 @@ function EditableOption({ label, value, onSave, isCorrect = false }: {
     <div className={`flex items-center gap-2 group/opt rounded px-1 -mx-1 transition-colors
       ${isCorrect ? 'text-[#2d6b4f] font-semibold' : 'text-gray-700'}`}>
       <span className={`font-semibold shrink-0 ${isCorrect ? 'text-[#2d6b4f]' : ''}`}>{label}</span>
-      <span className="flex-1">{value}</span>
+      <span className="flex-1 math-markdown">
+        <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]} components={{ p: 'span' }}>
+          {value}
+        </ReactMarkdown>
+      </span>
       {isCorrect && (
         <Check className="w-3.5 h-3.5 text-[#2d6b4f] shrink-0" aria-label="Correct answer" />
       )}
@@ -475,12 +487,18 @@ export function ViewPaper() {
                 : <>Answer key mode — click the pencil next to each <strong className="mx-0.5">Answer</strong> field to fill in the correct answer.</>
               }
               {" "}Use <strong className="mx-0.5">Export PDF → With Answer Key</strong> to download.
+              <span className="ml-2 px-2 py-0.5 rounded text-[11px] font-medium bg-[#94B49C]/20 text-[#3e6358]">
+                💡 For complex math, use <strong>Print → Save as PDF</strong> instead of Export.
+              </span>
             </>
           ) : (
             <>
               <Pencil className="w-3.5 h-3.5 shrink-0" />
               Hover over any question or option and click the <strong className="mx-0.5">pencil icon</strong> to edit.
               Use <strong className="mx-0.5">+</strong> to add and <strong className="mx-0.5">✕</strong> to delete questions.
+              <span className="ml-2 px-2 py-0.5 rounded text-[11px] font-medium bg-[#94B49C]/20 text-[#3e6358]">
+                💡 For complex math, use <strong>Print → Save as PDF</strong> instead of Export.
+              </span>
               {answeredCount > 0 && (
                 <span className="ml-auto shrink-0 font-medium" style={{ color: "#94B49C" }}>
                   {answeredCount}/{totalQuestions} answers ready
