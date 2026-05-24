@@ -1012,8 +1012,9 @@ export function savePaper(paper: Paper): void {
 }
 // ── Chapter Splitting ──
 export function splitTextIntoChapters(text: string, baseTitle: string): { title: string, text: string }[] {
-  // Matches "CHAPTER 1", "UNIT II", "MODULE 3: Kinematics"
-  const chapterRegex = /(?:^|\n\n)\s*(CHAPTER|UNIT|MODULE)\s+([0-9IVX]+(?:[\s\-:]+[A-Za-z0-9 ]{1,50})?)\b/gi;
+  // Make regex more resilient by ignoring newlines (PDF extraction often strips them).
+  // Also adds support for Lesson, Topic, and Part.
+  const chapterRegex = /\b(CHAPTER|UNIT|MODULE|LESSON|TOPIC|PART)\s+([0-9IVX]+(?:[\s\-:]+[A-Za-z0-9 ]{1,40})?)\b/gi;
   
   const matches = [...text.matchAll(chapterRegex)];
   if (matches.length < 2) return [{ title: baseTitle, text }];
@@ -1030,7 +1031,7 @@ export function splitTextIntoChapters(text: string, baseTitle: string): { title:
     const chapterText = text.slice(startIndex, endIndex).trim();
     
     let header = match[0].trim().replace(/\s+/g, ' ');
-    header = header.replace(/^(CHAPTER|UNIT|MODULE)/i, (m) => m.charAt(0).toUpperCase() + m.slice(1).toLowerCase());
+    header = header.replace(/^(CHAPTER|UNIT|MODULE|LESSON|TOPIC|PART)/i, (m) => m.charAt(0).toUpperCase() + m.slice(1).toLowerCase());
     
     const chapterTitle = `${baseTitle} - ${header}`;
     
