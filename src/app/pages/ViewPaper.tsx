@@ -386,6 +386,24 @@ export function ViewPaper() {
 
   const handleExport = async (withKey: boolean) => {
     if (!paper) return;
+
+    // For STEM, we MUST use native browser print to render KaTeX math correctly
+    if (paper.subjectType === "math_physics" || paper.subjectType === "chemistry") {
+      if (withKey && !showAnswers) {
+        setShowAnswers(true);
+        toast.info("Answer key shown. Please save as PDF in the print dialog to preserve math formatting.", { duration: 5000 });
+        setTimeout(() => window.print(), 500);
+      } else if (!withKey && showAnswers) {
+        setShowAnswers(false);
+        toast.info("Answer key hidden. Please save as PDF in the print dialog to preserve math formatting.", { duration: 5000 });
+        setTimeout(() => window.print(), 500);
+      } else {
+        toast.info("Please select 'Save as PDF' in the print dialog. This perfectly preserves all math formulas!", { duration: 5000 });
+        window.print();
+      }
+      return;
+    }
+
     setIsExporting(true);
     try {
       await exportPaperToPDF(paper, withKey);
