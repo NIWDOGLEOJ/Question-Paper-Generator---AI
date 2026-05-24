@@ -1053,6 +1053,10 @@ export function deletePaper(id: string): void {
   _papers = _papers.filter(p => p.id !== id);
   dbDelete('papers', id).catch(e => console.error('[DB] deletePaper failed:', e));
 }
+export function clearAllPapers(): void {
+  _papers = [];
+  import('./db').then(m => m.dbClear('papers')).catch(e => console.error('[DB] clearAllPapers failed:', e));
+}
 export function updatePaperTags(id: string, tags: string[]): void {
   _papers = _papers.map(p => p.id === id ? { ...p, tags } : p);
   const updated = _papers.find(p => p.id === id);

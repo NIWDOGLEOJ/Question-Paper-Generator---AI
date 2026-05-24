@@ -38,6 +38,11 @@ export function deleteSource(id: string): void {
   dbDelete('sources', id).catch(e => console.error('[DB] deleteSource failed:', e));
 }
 
+export function clearAllSources(): void {
+  _sources = [];
+  import('./db').then(m => m.dbClear('sources')).catch(e => console.error('[DB] clearAllSources failed:', e));
+}
+
 export function updateSource(
   id: string,
   patch: Partial<Pick<SourceMaterial, 'title' | 'subject'>>,

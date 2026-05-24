@@ -61,6 +61,16 @@ export async function dbDelete(store: string, key: string): Promise<void> {
   });
 }
 
+export async function dbClear(store: string): Promise<void> {
+  const db = await open();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(store, 'readwrite');
+    tx.objectStore(store).clear();
+    tx.oncomplete = () => resolve();
+    tx.onerror    = () => reject(tx.error);
+  });
+}
+
 // ── One-time migration from localStorage ──────────────────────────────────
 async function migrateFromLocalStorage(): Promise<void> {
   const migrations = [

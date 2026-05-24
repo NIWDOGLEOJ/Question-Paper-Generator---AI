@@ -134,11 +134,11 @@ export function SettingsPage() {
   // ── Danger zone actions ──
   const handleClear = (what: typeof confirmClear) => {
     if (what === "papers" || what === "all") {
-      localStorage.removeItem("questionPapers");
+      pdfService.clearAllPapers();
       setStats(s => ({ ...s, papers: 0 }));
     }
     if (what === "sources" || what === "all") {
-      localStorage.removeItem("qpg_sources");
+      sourceService.clearAllSources();
       setStats(s => ({ ...s, sources: 0 }));
     }
     if (what === "templates" || what === "all") {
