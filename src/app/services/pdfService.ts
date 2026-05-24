@@ -1014,41 +1014,73 @@ export function savePaper(paper: Paper): void {
 export function splitTextIntoChapters(text: string, baseTitle: string): { title: string, text: string }[] {
   // Make regex more resilient by ignoring newlines (PDF extraction often strips them).
   // Also adds support for Lesson, Topic, and Part.
-  const chapterRegex = /\b(CHAPTER|UNIT|MODULE|LESSON|TOPIC|PART)\s+([0-9IVX]+(?:[\s\-:]+[A-Za-z0-9 ]{1,40})?)\b/gi;
+  const chapterRegex = /\b(CHAPTER|UNIT|MODULE|LESSON|TOPIC|PART)\s+([0-9IVX]+(?:[\s\-:.,&]+[A-Za-z0-9 ]{1,40})?)\b/gi;
   
   const matches = [...text.matchAll(chapterRegex)];
   if (matches.length < 2) return [{ title: baseTitle, text }];
   
-  const chaptersMap = new Map<string, string>();
+  const chaptersMap = new Map<string, { title: string, text: string }>();
   
+  // 1. Filter out inline references
+  const validMatches = [];
   for (let i = 0; i < matches.length; i++) {
     const match = matches[i];
-    const nextMatch = matches[i + 1];
-    
-    // Check if this looks like an inline reference (e.g. "as we see in Chapter 2")
     const before = text.slice(Math.max(0, match.index! - 20), match.index!).toLowerCase();
     const isInline = /\b(in|see|from|read|to|refer|discuss(ed)?|covered)\s+$/i.test(before);
-    if (isInline) continue; // Skip inline references completely
+    if (!isInline) validMatches.push({ match, nextMatch: matches[i + 1] });
+  }
+
+  // 2. Find dominant prefix to prevent 12 chapters when there are 6 chapters and 6 units
+  const prefixCounts: Record<string, number> = { CHAPTER: 0, UNIT: 0, MODULE: 0, LESSON: 0, TOPIC: 0, PART: 0 };
+  for (const { match } of validMatches) {
+    const prefix = match[1].toUpperCase();
+    if (prefix in prefixCounts) prefixCounts[prefix]++;
+  }
+
+  const priorities = ['CHAPTER', 'UNIT', 'MODULE', 'LESSON', 'TOPIC', 'PART'];
+  let dominantPrefix: string | null = null;
+  for (const p of priorities) {
+    if (prefixCounts[p] >= 2) {
+      dominantPrefix = p;
+      break;
+    }
+  }
+
+  const filteredMatches = dominantPrefix 
+    ? validMatches.filter(m => m.match[1].toUpperCase() === dominantPrefix)
+    : validMatches;
+
+  // 3. Group by ID to merge TOC and actual chapters perfectly
+  for (let i = 0; i < filteredMatches.length; i++) {
+    const { match } = filteredMatches[i];
+    const nextMatch = filteredMatches[i + 1] ? filteredMatches[i + 1].match : null;
     
     const startIndex = match.index!;
     const endIndex = nextMatch ? nextMatch.index! : text.length;
-    
     const chapterText = text.slice(startIndex, endIndex).trim();
-    
+
+    const type = match[1].toUpperCase();
+    const numMatch = match[2].trim().match(/^[0-9IVX]+/i);
+    const num = numMatch ? numMatch[0].toUpperCase() : match[2].trim().split(/[\s\-:.,&]+/)[0];
+    const chapterId = `${type} ${num}`; // e.g. "CHAPTER 1"
+
     let header = match[0].trim().replace(/\s+/g, ' ');
     header = header.replace(/^(CHAPTER|UNIT|MODULE|LESSON|TOPIC|PART)/i, (m) => m.charAt(0).toUpperCase() + m.slice(1).toLowerCase());
     
-    // FIX: Just use the header (e.g. "Chapter 1") instead of prefixing with the PDF name
-    const chapterTitle = header;
-    
-    // Ignore extremely short chunks (usually Table of Contents artifacts)
+    // Ignore extremely short chunks (TOC artifacts)
     if (chapterText.length > 500) {
-      const existing = chaptersMap.get(chapterTitle) || '';
-      chaptersMap.set(chapterTitle, existing ? existing + '\n\n' + chapterText : chapterText);
+      const existing = chaptersMap.get(chapterId);
+      if (existing) {
+        // Keep the longest title found for this chapter ID
+        const bestTitle = header.length > existing.title.length ? header : existing.title;
+        chaptersMap.set(chapterId, { title: bestTitle, text: existing.text + '\n\n' + chapterText });
+      } else {
+        chaptersMap.set(chapterId, { title: header, text: chapterText });
+      }
     }
   }
   
-  const chapters = Array.from(chaptersMap.entries()).map(([title, text]) => ({ title, text }));
+  const chapters = Array.from(chaptersMap.values());
   if (chapters.length < 2) return [{ title: baseTitle, text }];
   return chapters;
 }
