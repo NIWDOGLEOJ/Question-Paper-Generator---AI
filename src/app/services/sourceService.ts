@@ -66,7 +66,7 @@ export function createSource(
     .trim();
 
   return {
-    id:        `src-${Date.now()}`,
+    id:        `src-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
     name:      file.name,
     title,
     subject:   '',
