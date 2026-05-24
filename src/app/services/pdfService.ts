@@ -1019,11 +1019,16 @@ export function splitTextIntoChapters(text: string, baseTitle: string): { title:
   const matches = [...text.matchAll(chapterRegex)];
   if (matches.length < 2) return [{ title: baseTitle, text }];
   
-  const chapters: { title: string, text: string }[] = [];
+  const chaptersMap = new Map<string, string>();
   
   for (let i = 0; i < matches.length; i++) {
     const match = matches[i];
     const nextMatch = matches[i + 1];
+    
+    // Check if this looks like an inline reference (e.g. "as we see in Chapter 2")
+    const before = text.slice(Math.max(0, match.index! - 20), match.index!).toLowerCase();
+    const isInline = /\b(in|see|from|read|to|refer|discuss(ed)?|covered)\s+$/i.test(before);
+    if (isInline) continue; // Skip inline references completely
     
     const startIndex = match.index!;
     const endIndex = nextMatch ? nextMatch.index! : text.length;
@@ -1033,14 +1038,17 @@ export function splitTextIntoChapters(text: string, baseTitle: string): { title:
     let header = match[0].trim().replace(/\s+/g, ' ');
     header = header.replace(/^(CHAPTER|UNIT|MODULE|LESSON|TOPIC|PART)/i, (m) => m.charAt(0).toUpperCase() + m.slice(1).toLowerCase());
     
-    const chapterTitle = `${baseTitle} - ${header}`;
+    // FIX: Just use the header (e.g. "Chapter 1") instead of prefixing with the PDF name
+    const chapterTitle = header;
     
     // Ignore extremely short chunks (usually Table of Contents artifacts)
     if (chapterText.length > 500) {
-      chapters.push({ title: chapterTitle, text: chapterText });
+      const existing = chaptersMap.get(chapterTitle) || '';
+      chaptersMap.set(chapterTitle, existing ? existing + '\n\n' + chapterText : chapterText);
     }
   }
   
+  const chapters = Array.from(chaptersMap.entries()).map(([title, text]) => ({ title, text }));
   if (chapters.length < 2) return [{ title: baseTitle, text }];
   return chapters;
 }
