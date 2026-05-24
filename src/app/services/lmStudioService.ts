@@ -55,7 +55,7 @@ export function getLMStudioConfig(): LMStudioConfig {
   return {
     enabled:      false,
     apiUrl:       'http://localhost:1234/v1',
-    model:        '',
+    model:        'local-model',
     apiToken:     '',
     maxTokens:    2048,
     contextChars: 6000,
@@ -236,17 +236,21 @@ async function callLLM(prompt: string, config: LMStudioConfig): Promise<string> 
   const timer = setTimeout(() => controller.abort(), 120_000);
 
   try {
+    const payload: any = {
+      messages:    [{ role: 'user', content: prompt }],
+      temperature: 0.3,
+      max_tokens:  config.maxTokens,
+      stream:      false,
+    };
+    if (config.model && config.model !== 'local-model') {
+      payload.model = config.model;
+    }
+
     const res = await fetch(`${config.apiUrl}/chat/completions`, {
       method:  'POST',
       headers,
       signal:  controller.signal,
-      body: JSON.stringify({
-        model:       config.model,
-        messages:    [{ role: 'user', content: prompt }],
-        temperature: 0.3,
-        max_tokens:  config.maxTokens,
-        stream:      false,
-      }),
+      body: JSON.stringify(payload),
     });
 
     if (!res.ok) {

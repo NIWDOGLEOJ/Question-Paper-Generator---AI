@@ -99,7 +99,7 @@ export function SettingsPage() {
     setLoadingModels(true);
     const list = await fetchAvailableModels(cfg.apiUrl, cfg.apiToken);
     setModels(list);
-    if (list.length > 0 && !cfg.model) setCfg(c => ({ ...c, model: list[0] }));
+    if (list.length > 0 && !cfg.model) setCfg(c => ({ ...c, model: "local-model" }));
     setLoadingModels(false);
   };
 
@@ -243,17 +243,18 @@ export function SettingsPage() {
           <div className="flex gap-2">
             {models.length > 0 ? (
               <div className="relative flex-1">
-                <select value={cfg.model}
+                <select value={cfg.model || "local-model"}
                   onChange={e => setCfg(c => ({ ...c, model: e.target.value }))}
                   className="fm-select w-full h-9 pr-8 appearance-none">
+                  <option value="local-model">Use currently loaded model (Auto)</option>
                   {models.map(m => <option key={m} value={m}>{m}</option>)}
                 </select>
                 <ChevronDown className="absolute right-2 top-2 w-4 h-4 text-[#527D6F] pointer-events-none" />
               </div>
             ) : (
-              <input type="text" value={cfg.model}
+              <input type="text" value={cfg.model || "local-model"}
                 onChange={e => setCfg(c => ({ ...c, model: e.target.value }))}
-                placeholder="Click ↻ to detect" className={`${inputCls} flex-1`} />
+                placeholder="local-model" className={`${inputCls} flex-1`} />
             )}
             <button onClick={loadModels} disabled={loadingModels} title="Auto-detect models"
               className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0 transition-all"
