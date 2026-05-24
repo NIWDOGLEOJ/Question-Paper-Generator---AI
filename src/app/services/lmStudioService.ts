@@ -255,12 +255,17 @@ async function callLLM(prompt: string, config: LMStudioConfig): Promise<string> 
 
     if (!res.ok) {
       const body = await res.text().catch(() => '');
-      // 500 / 503 usually means the model crashed (OOM) or is still loading
+      if (res.status === 400 && body.toLowerCase().includes('context length')) {
+        throw new Error(
+          `Context Length Exceeded: The model's context window is too small for this request. ` +
+          `Fix 1: Go to LM Studio, eject the model, and reload it with a larger "Context Length" (e.g., 8192). ` +
+          `Fix 2: In this app's Settings, reduce "Context Chars" to 3000 and "Max Tokens" to 1024.`
+        );
+      }
       if (res.status === 500 || res.status === 503) {
         throw new Error(
           `LM Studio crashed (status ${res.status}). ` +
-          'This is usually an Out-of-Memory error — your model is too large. ' +
-          'Try: (1) load a smaller model (3–8B), or (2) reduce Context Chars and Max Tokens in LM Studio Settings.'
+          `This is usually an Out-of-Memory error. Try loading a smaller model (3–8B) or reducing context size.`
         );
       }
       throw new Error(`LM Studio error ${res.status}: ${body.slice(0, 200)}`);
