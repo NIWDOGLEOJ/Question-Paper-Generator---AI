@@ -36,6 +36,10 @@ export interface Paper {
   totalMarks: number; sections: PaperSection[];
   createdAt: string; sourceFile: string;
   tags?: string[];
+  /** Target audience academic level (e.g., High School, College) */
+  academicLevel?: string;
+  /** Subject classification for math/science rendering logic */
+  subjectType?: SubjectType;
   /** Extracted PDF text — stored so sections can be regenerated without re-uploading */
   sourceText?: string;
 }
@@ -414,7 +418,8 @@ function analyzeContent(pdfText: string, subjectType: SubjectType = 'general'): 
 // ── Generate questions ──
 export async function generateQuestions(
   pdfText: string, sections: Section[], paperTitle: string,
-  subject: string, duration: string, fileName: string
+  subject: string, duration: string, fileName: string,
+  academicLevel: string = "High School"
 ): Promise<Paper> {
   const t0          = performance.now();
   const useLLM      = getLMStudioConfig().enabled;
@@ -422,19 +427,19 @@ export async function generateQuestions(
   // For STEM subjects, clean garbled symbols before analysis and LLM
   const cleanedText = subjectType !== 'general' ? cleanStemText(pdfText) : pdfText;
   const analysis    = analyzeContent(cleanedText, subjectType);
-  const { keywords, topics, definitions, facts, concepts, sentences } = analysis;
+  const { keywords, topics, definitions, facts, concepts, sentences, stemProblems } = analysis;
 
-  let generatedSections: PaperSection[];
+  let finalSections: PaperSection[] = [];
 
-  if (useLLM) {
-    generatedSections = [];
-    for (let idx = 0; idx < sections.length; idx++) {
-      const section = sections[idx];
-      let questions: Question[];
+  for (let sIdx = 0; sIdx < sections.length; sIdx++) {
+    const section = sections[sIdx];
+    let questions: Question[];
+
+    if (useLLM) {
       try {
         questions = await generateQuestionsWithLLM(
-          cleanedText, section, idx, subject, subjectType,
-          analysis.stemProblems,  // pass extracted problem sentences to the LLM prompt
+          cleanedText, section, sIdx, subject, subjectType,
+          stemProblems, academicLevel
         );
       } catch (err) {
         // DO NOT silently fall back — surface the real error so the user knows LM Studio failed
@@ -445,20 +450,24 @@ export async function generateQuestions(
           `You can disable LM Studio in Settings to use the built-in template generator instead.`
         );
       }
-      generatedSections.push({ name: section.name, instructions: getInstructions(section), type: section.type, questions });
+    } else {
+      questions = templateQuestions(section, sIdx, keywords, topics, concepts, sentences, definitions, facts, subject, subjectType, academicLevel);
     }
-  } else {
-    generatedSections = sections.map((section, idx) => ({
-      name: section.name, instructions: getInstructions(section), type: section.type,
-      questions: templateQuestions(section, idx, keywords, topics, concepts, sentences, definitions, facts, subject, subjectType),
-    }));
+    finalSections.push({ name: section.name, instructions: getInstructions(section), type: section.type, questions });
   }
 
   console.log(`generateQuestions [${subjectType}]: ${((performance.now() - t0) / 1000).toFixed(2)}s`);
   return {
-    id: `paper-${Date.now()}`, title: paperTitle, subject, duration,
+    id: `p-${Date.now()}`,
+    title: paperTitle,
+    subject,
+    duration,
     totalMarks: sections.reduce((a, s) => a + s.count * s.marks, 0),
-    sections: generatedSections, createdAt: new Date().toISOString(), sourceFile: fileName,
+    sections: finalSections,
+    createdAt: new Date().toISOString(),
+    sourceFile: fileName,
+    academicLevel,
+    subjectType,
     sourceText: cleanedText,
   };
 }
@@ -763,7 +772,7 @@ const STEM_ESSAY: Record<Exclude<SubjectType,'general'>, string[]> = {
 function templateQuestions(
   section: Section, sectionIdx: number, keywords: string[], topics: string[],
   concepts: string[], sentences: string[], definitions: string[], facts: string[],
-  subject: string, subjectType: SubjectType = 'general',
+  subject: string, subjectType: SubjectType = 'general', academicLevel: string = "High School"
 ): Question[] {
   const bloom = BLOOMS[(section.difficulty as Difficulty)] ?? BLOOMS.Medium;
   const kl = Math.max(keywords.length, 1);

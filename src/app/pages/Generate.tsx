@@ -212,6 +212,7 @@ export function Generate() {
   const [isDragging, setIsDragging] = useState(false);
   const [paperTitle, setPaperTitle] = useState("");
   const [subject, setSubject]     = useState("");
+  const [academicLevel, setAcademicLevel] = useState("High School");
   const [duration, setDuration]   = useState("120");
   const [sections, setSections]   = useState<Section[]>([
     { id: "1", name: "Section A", type: "Multiple Choice", count: 10, marks: 1, difficulty: "Easy" },
@@ -345,6 +346,7 @@ export function Generate() {
         subject    || "Subject",
         `${duration} Minutes`,
         fileName,
+        academicLevel
       );
 
       setStage("done");
@@ -610,7 +612,7 @@ export function Generate() {
             </div>
 
             {/* Metadata */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pb-6"
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 pb-6"
               style={{ borderBottom: "1px solid rgba(148,180,156,0.12)" }}>
               {[
                 { label: "Paper Title",    value: paperTitle, set: setPaperTitle, placeholder: "Mid-Term Exam"  },
@@ -624,6 +626,16 @@ export function Generate() {
                     className="fm-input w-full h-9 rounded-lg px-3 text-sm" />
                 </div>
               ))}
+              <div>
+                <Label className="text-xs font-semibold text-[#94B49C] mb-1.5 block tracking-wide uppercase">Academic Level</Label>
+                <select value={academicLevel} onChange={e => setAcademicLevel(e.target.value)} className="fm-select w-full h-9">
+                  <option>Elementary School</option>
+                  <option>Middle School</option>
+                  <option>High School</option>
+                  <option>Undergraduate (College)</option>
+                  <option>Graduate / Professional</option>
+                </select>
+              </div>
             </div>
 
             {/* LM Studio status banner */}

@@ -154,6 +154,7 @@ function buildPrompt(
   subject:      string,
   subjectType:  SubjectType = 'general',
   stemProblems: string[]    = [],
+  academicLevel: string     = "High School"
 ): string {
   const { count, type, difficulty, marks } = section;
   const bloom     = BLOOMS_PROMPT[difficulty] ?? BLOOMS_PROMPT.Medium;
@@ -198,16 +199,20 @@ SYMBOL / FORMULA HANDLING:
       stemProblems.slice(0, 10).map((p, i) => `${i + 1}. ${p}`).join('\n')
     : '';
 
-  return `You are an expert exam paper writer for ${subject}.
-Using ONLY the textbook content provided, write exactly ${count} ${type} questions.
-Each question is worth ${marks} mark(s).
+  return `You are an expert ${subject} test-setter creating an exam for a ${academicLevel} class.
+Your task is to generate EXACTLY ${count} "${type}" questions based ONLY on the provided textbook excerpt.
 
-COGNITIVE LEVEL (Bloom's Taxonomy): ${difficulty} — ${bloom.level}
-Target: ${bloom.description}.
-Preferred question verbs: ${bloom.exampleVerbs}.${stemBlock}${symbolGuidance}${problemsBlock}
+CRITICAL REQUIREMENTS:
+1. Target Audience: These questions MUST be strictly calibrated for a ${academicLevel} level. Do not generate overly basic or overly advanced questions for this level.
+2. Difficulty: ${difficulty}. ${bloom.level} — ${bloom.description}. Preferred question verbs: ${bloom.exampleVerbs}.
+3. Marks: Each question is worth ${marks} marks.
+4. Accuracy: Do NOT hallucinate. Every fact, concept, or equation must be grounded in the text.${stemBlock}${symbolGuidance}${problemsBlock}
+5. FORMATTING: You MUST follow the exact format below. Do not add conversational text, introductions, or conclusions.
 
-TEXTBOOK CONTENT:
+TEXTBOOK EXCERPT:
+"""
 ${pdfSample}
+"""
 
 OUTPUT FORMAT — follow this exactly:
 ${format}
@@ -419,6 +424,7 @@ export async function generateQuestionsWithLLM(
   subject:      string,
   subjectType:  SubjectType = 'general',
   stemProblems: string[]    = [],
+  academicLevel: string     = "High School"
 ): Promise<Question[]> {
   const config = getLMStudioConfig();
   if (!config.enabled) throw new Error('LM Studio is not enabled');
@@ -430,7 +436,7 @@ export async function generateQuestionsWithLLM(
   const t0 = performance.now();
   try {
     const sample = samplePdfText(pdfText, config.contextChars, subjectType);
-    const prompt = buildPrompt(sample, section, subject, subjectType, stemProblems);
+    const prompt = buildPrompt(sample, section, subject, subjectType, stemProblems, academicLevel);
     raw = await callLLM(prompt, config);
   } catch (err: any) {
     if (err.message && err.message.includes('Context Length Exceeded')) {
@@ -438,7 +444,7 @@ export async function generateQuestionsWithLLM(
       const fallbackConfig = { ...config, contextChars: Math.floor(config.contextChars / 2), maxTokens: 1024 };
       const fallbackSample = samplePdfText(pdfText, fallbackConfig.contextChars, subjectType);
       // Reduce stem problems from 10 to 5 to save space
-      const fallbackPrompt = buildPrompt(fallbackSample, section, subject, subjectType, stemProblems.slice(0, 5));
+      const fallbackPrompt = buildPrompt(fallbackSample, section, subject, subjectType, stemProblems.slice(0, 5), academicLevel);
       raw = await callLLM(fallbackPrompt, fallbackConfig);
     } else {
       throw err;
