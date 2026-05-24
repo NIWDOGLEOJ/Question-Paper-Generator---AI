@@ -1,6 +1,7 @@
 // PDF text extraction using pdfjs-dist + Tesseract.js OCR fallback
 import * as pdfjsLib from 'pdfjs-dist';
 import { getLMStudioConfig, generateQuestionsWithLLM } from './lmStudioService';
+import { cleanStemText } from './stemTextCleaner';
 import { dbPut, dbDelete } from './db';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
@@ -418,7 +419,9 @@ export async function generateQuestions(
   const t0          = performance.now();
   const useLLM      = getLMStudioConfig().enabled;
   const subjectType = classifySubject(subject, pdfText.slice(0, 5_000));
-  const analysis    = analyzeContent(pdfText, subjectType);
+  // For STEM subjects, clean garbled symbols before analysis and LLM
+  const cleanedText = subjectType !== 'general' ? cleanStemText(pdfText) : pdfText;
+  const analysis    = analyzeContent(cleanedText, subjectType);
   const { keywords, topics, definitions, facts, concepts, sentences } = analysis;
 
   let generatedSections: PaperSection[];
@@ -429,7 +432,10 @@ export async function generateQuestions(
       const section = sections[idx];
       let questions: Question[];
       try {
-        questions = await generateQuestionsWithLLM(pdfText, section, idx, subject, subjectType);
+        questions = await generateQuestionsWithLLM(
+          cleanedText, section, idx, subject, subjectType,
+          analysis.stemProblems,  // pass extracted problem sentences to the LLM prompt
+        );
       } catch (err) {
         // DO NOT silently fall back — surface the real error so the user knows LM Studio failed
         const msg = err instanceof Error ? err.message : String(err);
@@ -453,7 +459,7 @@ export async function generateQuestions(
     id: `paper-${Date.now()}`, title: paperTitle, subject, duration,
     totalMarks: sections.reduce((a, s) => a + s.count * s.marks, 0),
     sections: generatedSections, createdAt: new Date().toISOString(), sourceFile: fileName,
-    sourceText: pdfText,
+    sourceText: cleanedText,
   };
 }
 

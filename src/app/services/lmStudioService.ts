@@ -89,18 +89,55 @@ export async function testLMStudioConnection(apiUrl: string, apiToken: string): 
   }
 }
 
-// ── Smart sampler: spread across beginning, middle, end ──
-function samplePdfText(pdfText: string, maxChars: number): string {
+// ── STEM-aware sampler ──────────────────────────────────────────────────
+// For STEM subjects we score each paragraph by how many numbers/symbols
+// it contains and prefer the richest ones, up to maxChars total.
+// For general subjects we fall back to the begin/mid/end spread.
+function samplePdfText(
+  pdfText: string,
+  maxChars: number,
+  subjectType: SubjectType = 'general',
+): string {
   if (pdfText.length <= maxChars) return pdfText;
-  const t   = Math.floor(maxChars / 3);
-  const mid = Math.floor(pdfText.length / 2);
-  return (
-    pdfText.slice(0, t) +
-    '\n...\n' +
-    pdfText.slice(mid - Math.floor(t / 2), mid + Math.floor(t / 2)) +
-    '\n...\n' +
-    pdfText.slice(pdfText.length - t)
-  );
+
+  if (subjectType === 'general') {
+    // Original spread: beginning ⅓ + middle ⅓ + end ⅓
+    const t   = Math.floor(maxChars / 3);
+    const mid = Math.floor(pdfText.length / 2);
+    return (
+      pdfText.slice(0, t) +
+      '\n...\n' +
+      pdfText.slice(mid - Math.floor(t / 2), mid + Math.floor(t / 2)) +
+      '\n...\n' +
+      pdfText.slice(pdfText.length - t)
+    );
+  }
+
+  // STEM: score paragraphs by density of numeric/symbolic content
+  const paras = pdfText.split(/\n{2,}/).filter(p => p.trim().length > 40);
+  const scored = paras.map(p => {
+    const nums    = (p.match(/\d/g) ?? []).length;
+    const symbols = (p.match(/[=+\-×÷∫∑∏√∞αβγδθλμπΩ≤≥≠±°]/g) ?? []).length;
+    const units   = (p.match(/\b(?:kg|mol|m\/s|km\/h|\bN\b|\bJ\b|\bV\b|\bA\b|\bW\b|\bHz\b|°C|\bK\b|\bPa\b)/g) ?? []).length;
+    // Density = score per char (so short but equation-dense paragraphs score high)
+    const density = (nums * 2 + symbols * 4 + units * 3) / Math.max(p.length, 1);
+    return { p, density, len: p.length };
+  });
+
+  // Sort by density descending, take until we reach maxChars
+  scored.sort((a, b) => b.density - a.density);
+  const chosen: string[] = [];
+  let used = 0;
+  for (const { p, len } of scored) {
+    if (used + len > maxChars) continue;
+    chosen.push(p);
+    used += len;
+    if (used >= maxChars * 0.9) break;
+  }
+
+  // Always prepend the first 500 chars (subject introduction / chapter opening)
+  const intro = pdfText.slice(0, 500);
+  return intro + '\n...\n' + chosen.join('\n\n');
 }
 
 // ── Bloom's level guidance injected into each prompt ──
@@ -111,11 +148,26 @@ const BLOOMS_PROMPT: Record<string, { level: string; description: string; exampl
 };
 
 // ── Build a tight, well-structured prompt per question type ──
-function buildPrompt(pdfSample: string, section: Section, subject: string, subjectType: SubjectType = 'general'): string {
+function buildPrompt(
+  pdfSample:    string,
+  section:      Section,
+  subject:      string,
+  subjectType:  SubjectType = 'general',
+  stemProblems: string[]    = [],
+): string {
   const { count, type, difficulty, marks } = section;
   const bloom     = BLOOMS_PROMPT[difficulty] ?? BLOOMS_PROMPT.Medium;
   const typeLC    = type.toLowerCase();
   const stemBlock = subjectType !== 'general' ? '\n\n' + STEM_PROMPT[subjectType as Exclude<SubjectType,'general'>] : '';
+
+  // ── Symbol handling guidance for STEM ────────────────────────────────
+  // pdfjs often corrupts or drops math symbols. Instruct the LLM to handle gracefully.
+  const symbolGuidance = subjectType !== 'general' ? `
+SYMBOL / FORMULA HANDLING:
+- The source text was extracted from a PDF and may contain garbled or missing mathematical symbols.
+- If a formula or equation appears corrupted (e.g. "âˆ«" instead of "∫", "x ² " with extra spaces), infer the intended expression from context and write it correctly in your question.
+- Use standard text notation where needed: use ^ for superscripts (x^2), / for fractions (a/b), sqrt() for square roots, and spell out Greek letters (alpha, beta, theta, pi) if symbols won't render.
+- If you cannot confidently reconstruct a formula, ask a CONCEPTUAL question about the topic instead — do NOT invent numbers or equations that are not supported by the text.` : '';
 
   let format = '';
   let example = '';
@@ -140,13 +192,19 @@ function buildPrompt(pdfSample: string, section: Section, subject: string, subje
     example = `1. Explain X.\nAnswer: X refers to...\n\n2. Describe Y.\nAnswer: Y is characterised by...`;
   }
 
+  // ── Inject sample problems extracted from the PDF (STEM boost) ──────
+  const problemsBlock = stemProblems.length > 0
+    ? `\nEXAMPLE PROBLEMS FROM THE TEXTBOOK (use these as inspiration — do NOT copy verbatim):\n` +
+      stemProblems.slice(0, 10).map((p, i) => `${i + 1}. ${p}`).join('\n')
+    : '';
+
   return `You are an expert exam paper writer for ${subject}.
 Using ONLY the textbook content provided, write exactly ${count} ${type} questions.
 Each question is worth ${marks} mark(s).
 
 COGNITIVE LEVEL (Bloom's Taxonomy): ${difficulty} — ${bloom.level}
 Target: ${bloom.description}.
-Preferred question verbs: ${bloom.exampleVerbs}.${stemBlock}
+Preferred question verbs: ${bloom.exampleVerbs}.${stemBlock}${symbolGuidance}${problemsBlock}
 
 TEXTBOOK CONTENT:
 ${pdfSample}
@@ -163,6 +221,7 @@ RULES:
 - Match the cognitive level: ${bloom.level}. Use the preferred verbs listed above.
 - Include an "Answer:" line for EVERY question exactly as shown in the format above.
 - For MCQ: the Answer line must be just the letter (e.g., "Answer: B"). Do not repeat the option text.
+- If a formula or symbol in the source text is garbled, ask a conceptual question instead — do NOT invent values.
 - Do NOT add section headers, preamble, or closing remarks.
 - Start immediately with "1."`;
 }
@@ -327,20 +386,22 @@ function parseQuestions(raw: string, section: Section, sectionIdx: number): Ques
 
 // ── Main export: generate questions for one section ──
 export async function generateQuestionsWithLLM(
-  pdfText: string,
-  section: Section,
-  sectionIdx: number,
-  subject: string,
-  subjectType: SubjectType = 'general',
+  pdfText:      string,
+  section:      Section,
+  sectionIdx:   number,
+  subject:      string,
+  subjectType:  SubjectType = 'general',
+  stemProblems: string[]    = [],
 ): Promise<Question[]> {
   const config = getLMStudioConfig();
   if (!config.enabled) throw new Error('LM Studio is not enabled');
   if (!config.model)   throw new Error('No model selected. Please pick a model in LM Studio Settings.');
 
-  const sample = samplePdfText(pdfText, config.contextChars);
-  const prompt = buildPrompt(sample, section, subject, subjectType);
+  // Use STEM-aware sampler so equation-dense paragraphs are preferred
+  const sample = samplePdfText(pdfText, config.contextChars, subjectType);
+  const prompt = buildPrompt(sample, section, subject, subjectType, stemProblems);
 
-  console.log(`[LLM] Section "${section.name}" — ${section.count}× ${section.type} [${subjectType}]`);
+  console.log(`[LLM] Section "${section.name}" — ${section.count}× ${section.type} [${subjectType}] stemProblems=${stemProblems.length}`);
   const t0  = performance.now();
   const raw = await callLLM(prompt, config);
   console.log(`[LLM] Response in ${((performance.now() - t0) / 1000).toFixed(1)}s — ${raw.length} chars`);
