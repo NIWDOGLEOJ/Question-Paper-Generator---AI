@@ -97,24 +97,35 @@ function samplePdfText(
   pdfText: string,
   maxChars: number,
   subjectType: SubjectType = 'general',
+  chunkIndex: number = 0,
+  totalChunks: number = 1
 ): string {
-  if (pdfText.length <= maxChars) return pdfText;
+  let chunkText = pdfText;
+  if (totalChunks > 1) {
+    const chunkLen = Math.max(Math.floor(pdfText.length / totalChunks), 1);
+    const start = chunkIndex * chunkLen;
+    // We give a small overlap of 5% of chunkLen to avoid cutting sentences abruptly
+    const overlap = Math.floor(chunkLen * 0.05);
+    chunkText = pdfText.slice(Math.max(0, start - overlap), start + chunkLen + overlap);
+  }
+
+  if (chunkText.length <= maxChars) return chunkText;
 
   if (subjectType === 'general') {
     // Original spread: beginning ⅓ + middle ⅓ + end ⅓
     const t   = Math.floor(maxChars / 3);
-    const mid = Math.floor(pdfText.length / 2);
+    const mid = Math.floor(chunkText.length / 2);
     return (
-      pdfText.slice(0, t) +
+      chunkText.slice(0, t) +
       '\n...\n' +
-      pdfText.slice(mid - Math.floor(t / 2), mid + Math.floor(t / 2)) +
+      chunkText.slice(mid - Math.floor(t / 2), mid + Math.floor(t / 2)) +
       '\n...\n' +
-      pdfText.slice(pdfText.length - t)
+      chunkText.slice(chunkText.length - t)
     );
   }
 
   // STEM: score paragraphs by density of numeric/symbolic content
-  const paras = pdfText.split(/\n{2,}/).filter(p => p.trim().length > 40);
+  const paras = chunkText.split(/\n{2,}/).filter(p => p.trim().length > 40);
   const scored = paras.map(p => {
     const nums    = (p.match(/\d/g) ?? []).length;
     const symbols = (p.match(/[=+\-×÷∫∑∏√∞αβγδθλμπΩ≤≥≠±°]/g) ?? []).length;
@@ -136,7 +147,7 @@ function samplePdfText(
   }
 
   // Always prepend the first 500 chars (subject introduction / chapter opening)
-  const intro = pdfText.slice(0, 500);
+  const intro = chunkText.slice(0, 500);
   return intro + '\n...\n' + chosen.join('\n\n');
 }
 
@@ -416,6 +427,8 @@ function parseQuestions(raw: string, section: Section, sectionIdx: number): Ques
   return questions;
 }
 
+const MAX_Q_PER_BATCH = 10;
+
 // ── Main export: generate questions for one section ──
 export async function generateQuestionsWithLLM(
   pdfText:      string,
@@ -432,29 +445,47 @@ export async function generateQuestionsWithLLM(
 
   console.log(`[LLM] Section "${section.name}" — ${section.count}× ${section.type} [${subjectType}] stemProblems=${stemProblems.length}`);
   
-  let raw = '';
-  const t0 = performance.now();
-  try {
-    const sample = samplePdfText(pdfText, config.contextChars, subjectType);
-    const prompt = buildPrompt(sample, section, subject, subjectType, stemProblems, academicLevel);
-    raw = await callLLM(prompt, config);
-  } catch (err: any) {
-    if (err.message && err.message.includes('Context Length Exceeded')) {
-      console.warn("[LLM] Context length exceeded! Retrying with 50% reduced context and 1024 max tokens...");
-      const fallbackConfig = { ...config, contextChars: Math.floor(config.contextChars / 2), maxTokens: 1024 };
-      const fallbackSample = samplePdfText(pdfText, fallbackConfig.contextChars, subjectType);
-      // Reduce stem problems from 10 to 5 to save space
-      const fallbackPrompt = buildPrompt(fallbackSample, section, subject, subjectType, stemProblems.slice(0, 5), academicLevel);
-      raw = await callLLM(fallbackPrompt, fallbackConfig);
-    } else {
-      throw err;
-    }
-  }
-  
-  console.log(`[LLM] Response in ${((performance.now() - t0) / 1000).toFixed(1)}s — ${raw.length} chars`);
+  const totalQuestions = section.count;
+  const totalBatches = Math.ceil(totalQuestions / MAX_Q_PER_BATCH);
+  let allQuestions: Question[] = [];
 
-  raw = cleanLLMMath(raw);
-  const questions = parseQuestions(raw, section, sectionIdx);
-  console.log(`[LLM] Parsed ${questions.length}/${section.count} questions`);
-  return questions;
+  for (let batchIdx = 0; batchIdx < totalBatches; batchIdx++) {
+    const questionsToGenerate = Math.min(MAX_Q_PER_BATCH, totalQuestions - batchIdx * MAX_Q_PER_BATCH);
+    const batchSection = { ...section, count: questionsToGenerate };
+
+    let raw = '';
+    const t0 = performance.now();
+    try {
+      const sample = samplePdfText(pdfText, config.contextChars, subjectType, batchIdx, totalBatches);
+      const prompt = buildPrompt(sample, batchSection, subject, subjectType, stemProblems, academicLevel);
+      raw = await callLLM(prompt, config);
+    } catch (err: any) {
+      if (err.message && err.message.includes('Context Length Exceeded')) {
+        console.warn(`[LLM] Context length exceeded on batch ${batchIdx + 1}! Retrying with 50% reduced context and 1024 max tokens...`);
+        const fallbackConfig = { ...config, contextChars: Math.floor(config.contextChars / 2), maxTokens: 1024 };
+        const fallbackSample = samplePdfText(pdfText, fallbackConfig.contextChars, subjectType, batchIdx, totalBatches);
+        const fallbackPrompt = buildPrompt(fallbackSample, batchSection, subject, subjectType, stemProblems.slice(0, 5), academicLevel);
+        raw = await callLLM(fallbackPrompt, fallbackConfig);
+      } else {
+        throw err;
+      }
+    }
+    
+    console.log(`[LLM] Batch ${batchIdx + 1}/${totalBatches} Response in ${((performance.now() - t0) / 1000).toFixed(1)}s — ${raw.length} chars`);
+
+    raw = cleanLLMMath(raw);
+    const parsedQuestions = parseQuestions(raw, batchSection, sectionIdx);
+    
+    // Rewrite IDs to ensure they are sequential across batches
+    parsedQuestions.forEach((q, i) => {
+      q.id = sectionIdx * 100 + allQuestions.length + i + 1;
+    });
+
+    allQuestions.push(...parsedQuestions);
+  }
+
+  console.log(`[LLM] Parsed ${allQuestions.length}/${section.count} questions across ${totalBatches} batches`);
+  
+  // If we slightly over-generated due to parsing quirks, truncate to the requested count
+  return allQuestions.slice(0, section.count);
 }
