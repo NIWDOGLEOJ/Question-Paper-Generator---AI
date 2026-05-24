@@ -3,7 +3,7 @@ import { useNavigate } from "react-router";
 import {
   UploadCloud, FileText, Trash2, Wand2, AlertTriangle,
   Pencil, Check, X, BookOpen, Calendar, Hash,
-  HardDrive, Search, ChevronRight,
+  HardDrive, Search, ChevronRight, ListTree,
 } from "lucide-react";
 import { toast } from "sonner";
 import * as pdfService from "../services/pdfService";
@@ -147,20 +147,9 @@ export function SourceMaterialPage() {
       const baseTitle = file.name.replace(/\.pdf$/i, '').replace(/[-_]+/g, ' ').replace(/\b\w/g, c => c.toUpperCase()).trim();
       const chapters = pdfService.splitTextIntoChapters(text, baseTitle);
 
-      if (chapters.length > 1) {
-        let savedCount = 0;
-        for (const ch of chapters) {
-          const src = sourceService.createSource(file, ch.text, pageCount);
-          src.title = ch.title; // Override title
-          sourceService.saveSource(src);
-          savedCount++;
-        }
-        toast.success(`"${baseTitle}" was split into ${savedCount} chapters!`);
-      } else {
-        const src = sourceService.createSource(file, text, pageCount);
-        sourceService.saveSource(src);
-        toast.success(`"${src.title}" added to your library!`);
-      }
+      const src = sourceService.createSource(file, text, pageCount, chapters.length > 1 ? chapters : undefined);
+      sourceService.saveSource(src);
+      toast.success(`"${src.title}" added to your library!`);
       
       load();
     } catch (err) {
@@ -338,6 +327,12 @@ export function SourceMaterialPage() {
                           <HardDrive className="w-3 h-3" />
                           {fmtSize(src.sizeBytes)}
                         </span>
+                        {src.chapters && src.chapters.length > 0 && (
+                          <span className="flex items-center gap-1 text-[#94B49C] font-medium">
+                            <ListTree className="w-3 h-3" />
+                            {src.chapters.length} chapters
+                          </span>
+                        )}
                         {srcPapers.length > 0 && (
                           <span className="flex items-center gap-1 text-[#94B49C] font-medium">
                             <Wand2 className="w-3 h-3" />

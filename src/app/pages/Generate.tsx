@@ -4,7 +4,7 @@ import { Label } from "../components/ui/label";
 import {
   Plus, Trash2, Wand2, CheckCircle2, File, UploadCloud,
   ArrowRight, ArrowLeft, Cpu, Sparkles, FileText, Zap, AlertTriangle, ExternalLink,
-  BookTemplate, Save, X, LayoutTemplate,
+  BookTemplate, Save, X, LayoutTemplate, ListTree,
 } from "lucide-react";
 import { toast } from "sonner";
 import * as pdfService from "../services/pdfService";
@@ -231,6 +231,9 @@ export function Generate() {
   const [showPicker, setShowPicker]     = useState(false);
   const [showSaveModal, setShowSaveModal] = useState(false);
 
+  // Chapter selection state
+  const [selectedChapters, setSelectedChapters] = useState<number[]>([]);
+
   // ── Check for pre-loaded source from Source Material page ──
   useEffect(() => {
     const srcId = sessionStorage.getItem('qpg_preload_source');
@@ -239,8 +242,16 @@ export function Generate() {
       if (src) {
         setPreloadedSource(src);
         setSubject(src.subject || '');
-        // Auto-advance to step 2 since source is already loaded
-        setStep(2);
+        
+        if (src.chapters && src.chapters.length > 0) {
+          // Default all chapters to selected
+          setSelectedChapters(src.chapters.map((_, i) => i));
+          // Wait on Step 1 so user can toggle chapters
+          setStep(1);
+        } else {
+          // Auto-advance to step 2 since source is already loaded
+          setStep(2);
+        }
       }
       sessionStorage.removeItem('qpg_preload_source');
     }
@@ -249,6 +260,7 @@ export function Generate() {
   // ── File helpers ──
   const acceptFile = useCallback(async (f: File) => {
     if (f.type !== "application/pdf") { toast.error("Please upload a PDF file"); return; }
+    setPreloadedSource(null);
     setFile(f);
     setPageCount(null);
     setLoadingPageCount(true);
@@ -321,9 +333,14 @@ export function Generate() {
       let fileName: string;
 
       if (preloadedSource) {
-        // Use stored text — skip re-extraction
+        // Use stored text — optionally filter by selected chapters
         setStage("extracting");
-        pdfText  = preloadedSource.text;
+        if (preloadedSource.chapters && preloadedSource.chapters.length > 0 && selectedChapters.length > 0) {
+          const sortedSelected = [...selectedChapters].sort((a, b) => a - b);
+          pdfText = sortedSelected.map(i => preloadedSource.chapters![i].text).join('\n\n');
+        } else {
+          pdfText  = preloadedSource.text;
+        }
         fileName = preloadedSource.name;
         await new Promise(r => setTimeout(r, 300));
       } else {
@@ -431,6 +448,40 @@ export function Generate() {
                   className="text-xs text-[#527D6F] hover:text-[#c0504a] transition-colors">
                   Change
                 </button>
+              </div>
+            )}
+
+            {preloadedSource && preloadedSource.chapters && preloadedSource.chapters.length > 0 && (
+              <div className="rounded-xl px-4 py-4 space-y-3 fm-fadein"
+                style={{ background: "rgba(82,125,111,0.07)", border: "1px solid rgba(148,180,156,0.15)" }}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <ListTree className="w-3.5 h-3.5 text-[#527D6F]" />
+                    <span className="text-xs font-semibold text-[#94B49C] uppercase tracking-wide">
+                      Select Chapters
+                    </span>
+                  </div>
+                  <div className="flex gap-2">
+                    <button onClick={() => setSelectedChapters(preloadedSource.chapters!.map((_, i) => i))} className="text-[10px] px-2 py-1 rounded transition-all bg-[rgba(82,125,111,0.15)] text-[#94B49C] hover:text-[#D5E2D6] hover:bg-[rgba(82,125,111,0.25)]">Select All</button>
+                    <button onClick={() => setSelectedChapters([])} className="text-[10px] px-2 py-1 rounded transition-all bg-[rgba(192,80,74,0.1)] text-[#c0504a] hover:text-[#ff7b72] hover:bg-[rgba(192,80,74,0.15)]">Clear</button>
+                  </div>
+                </div>
+                <div className="max-h-[220px] overflow-y-auto space-y-1.5 pr-2 custom-scrollbar">
+                  {preloadedSource.chapters.map((ch, idx) => (
+                    <label key={idx} className="flex items-start gap-2 p-2 rounded-lg hover:bg-[rgba(82,125,111,0.08)] cursor-pointer transition-colors border border-transparent hover:border-[rgba(148,180,156,0.1)]">
+                      <input type="checkbox" className="mt-0.5 accent-[#527D6F]"
+                        checked={selectedChapters.includes(idx)}
+                        onChange={(e) => {
+                          if (e.target.checked) setSelectedChapters(prev => [...prev, idx]);
+                          else setSelectedChapters(prev => prev.filter(i => i !== idx));
+                        }} />
+                      <span className="text-sm text-[#D5E2D6] leading-snug">{ch.title}</span>
+                    </label>
+                  ))}
+                </div>
+                {selectedChapters.length === 0 && (
+                  <p className="text-[10px] text-[#c0504a] mt-2">Please select at least one chapter, or the whole book will be used.</p>
+                )}
               </div>
             )}
 

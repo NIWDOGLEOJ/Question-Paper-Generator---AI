@@ -13,6 +13,7 @@ export interface SourceMaterial {
   pageCount: number;
   sizeBytes: number;
   text:      string;       // full extracted PDF text (no arbitrary cap)
+  chapters?: { title: string; text: string }[];
   addedAt:   string;       // ISO date
   paperIds:  string[];     // IDs of papers generated from this source
 }
@@ -58,6 +59,7 @@ export function createSource(
   file: File,
   text: string,
   pageCount: number,
+  chapters?: { title: string; text: string }[]
 ): SourceMaterial {
   const title = file.name
     .replace(/\.pdf$/i, '')
@@ -73,6 +75,7 @@ export function createSource(
     pageCount,
     sizeBytes: file.size,
     text,                          // full text — no cap, IndexedDB handles it
+    chapters,
     addedAt:   new Date().toISOString(),
     paperIds:  [],
   };
