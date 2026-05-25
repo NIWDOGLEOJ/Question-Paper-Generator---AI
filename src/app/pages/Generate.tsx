@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useNavigate } from "react-router";
 import { Label } from "../components/ui/label";
 import {
@@ -233,6 +233,19 @@ export function Generate() {
 
   // Chapter selection state
   const [selectedChapters, setSelectedChapters] = useState<number[]>([]);
+
+  // ── Elapsed-time ticker (shown while LM Studio is generating) ──
+  const [elapsedSecs, setElapsedSecs] = useState(0);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  useEffect(() => {
+    if (stage === 'generating' && isGenerating) {
+      setElapsedSecs(0);
+      timerRef.current = setInterval(() => setElapsedSecs(s => s + 1), 1000);
+    } else {
+      if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+    }
+    return () => { if (timerRef.current) clearInterval(timerRef.current); };
+  }, [stage, isGenerating]);
 
   // ── Check for pre-loaded source from Source Material page ──
   useEffect(() => {
@@ -830,9 +843,16 @@ export function Generate() {
                 </div>
 
                 {lmEnabled && (
-                  <div className="flex items-center gap-2 text-xs text-[#94B49C] px-4 py-2 rounded-full"
+                  <div className="flex items-center gap-3 text-xs text-[#94B49C] px-4 py-2 rounded-full"
                     style={{ background: "rgba(82,125,111,0.15)", border: "1px solid rgba(82,125,111,0.3)" }}>
                     <Cpu className="w-3.5 h-3.5" /> LM Studio Active
+                    {stage === 'generating' && elapsedSecs > 0 && (
+                      <span className="ml-1 tabular-nums text-[#527D6F]">
+                        {Math.floor(elapsedSecs / 60) > 0
+                          ? `${Math.floor(elapsedSecs / 60)}m ${elapsedSecs % 60}s`
+                          : `${elapsedSecs}s`}
+                      </span>
+                    )}
                   </div>
                 )}
 

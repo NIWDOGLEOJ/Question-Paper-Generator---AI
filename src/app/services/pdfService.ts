@@ -51,15 +51,23 @@ function isSkippablePage(text: string): boolean {
     .filter(p => lower.includes(p)).length >= 2;
 }
 
-// ── Extract digital text from one page ──
+// ── Extract digital text from one page (preserving line breaks via hasEOL) ──
 async function extractPageText(pdf: pdfjsLib.PDFDocumentProxy, pageNum: number): Promise<string> {
   try {
     const page    = await pdf.getPage(pageNum);
     const content = await page.getTextContent();
-    const text    = content.items
-      .map((item: any) => ('str' in item ? item.str : ''))
-      .join(' ')
-      .replace(/\s+/g, ' ')
+    // pdfjs items have a `hasEOL` flag set when the item ends a visual line.
+    // Using it gives us real line structure instead of a flat space-joined blob.
+    const parts: string[] = [];
+    for (const item of content.items as any[]) {
+      if (!('str' in item)) continue;
+      parts.push(item.str);
+      if (item.hasEOL) parts.push('\n');
+      else if (item.str && !item.str.endsWith(' ')) parts.push(' ');
+    }
+    const text = parts.join('')
+      .replace(/[ \t]+/g, ' ')       // collapse horizontal whitespace only
+      .replace(/\n{3,}/g, '\n\n')    // max 2 consecutive blank lines
       .trim()
       .slice(0, MAX_CHARS_PER_PAGE);
     page.cleanup();
@@ -1011,17 +1019,77 @@ export function savePaper(paper: Paper): void {
   dbPut('papers', paper).catch(e => console.error('[DB] savePaper failed:', e));
 }
 // ── Chapter Splitting ──
+
+/**
+ * Extracts the full chapter title from the text after `matchEnd`.
+ *
+ * With hasEOL-preserved extraction the text now has real newlines, so we can
+ * reliably read the next non-empty line as the chapter heading.
+ *
+ * Layout A (same line with separator):  "CHAPTER 1: Atoms and Molecules"
+ * Layout B (title on its own line):     "CHAPTER 1\nAtoms and Molecules\n"
+ * Layout C (number on one line, title next): "CHAPTER\n1\nAtoms and Molecules"
+ */
+function extractChapterTitle(
+  keyword: string,
+  num: string,
+  matchEnd: number,
+  text: string
+): string {
+  const prefix = `${keyword.charAt(0).toUpperCase()}${keyword.slice(1).toLowerCase()} ${num}`;
+
+  // Scan the 300 chars immediately after the match
+  const after = text.slice(matchEnd, matchEnd + 300);
+
+  // Layout A: colon/dash separator on same line — "Chapter 1: Title" or "Chapter 1 - Title"
+  const inlineMatch = after.match(/^[ \t]*[:–\-—]+[ \t]*([^\n]{3,80})/);
+  if (inlineMatch) {
+    const candidate = inlineMatch[1].trim().replace(/\s+/g, ' ');
+    // Reject if it reads like running body text (lowercase start, too long, ends mid-sentence)
+    if (/^[A-Z]/.test(candidate) && candidate.length <= 80 && !/[.!?]$/.test(candidate)) {
+      return `${prefix}: ${candidate}`;
+    }
+  }
+
+  // Layout B/C: look at each line after the match until we find a heading-like line
+  const lines = after.split(/\r?\n/);
+  for (const rawLine of lines) {
+    const line = rawLine.trim().replace(/\s+/g, ' ');
+    if (!line) continue;
+
+    const wordCount = line.split(' ').length;
+    const isAllCaps = line === line.toUpperCase() && /[A-Z]{2,}/.test(line);
+    const isTitleCase = /^[A-Z]/.test(line) && wordCount <= 10;
+
+    if ((isAllCaps || isTitleCase) && line.length >= 3 && line.length <= 90 && wordCount <= 12) {
+      // Nicely capitalise ALL-CAPS titles (e.g. "ATOMS AND MOLECULES" → "Atoms and Molecules")
+      const STOP_WORDS = new Set(['and','or','of','the','in','a','an','to','for','with','by','on','at','from']);
+      const formatted = isAllCaps
+        ? line.replace(/\b\w+/g, (w, i) =>
+            i === 0 || !STOP_WORDS.has(w.toLowerCase())
+              ? w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()
+              : w.toLowerCase()
+          )
+        : line;
+      return `${prefix}: ${formatted}`;
+    }
+    // First non-empty line looked like body text — give up looking
+    break;
+  }
+
+  return prefix; // fallback: just "Chapter 1"
+}
+
 export function splitTextIntoChapters(text: string, baseTitle: string): { title: string, text: string }[] {
-  // Make regex more resilient by ignoring newlines (PDF extraction often strips them).
-  // Also adds support for Lesson, Topic, and Part.
-  const chapterRegex = /\b(CHAPTER|UNIT|MODULE|LESSON|TOPIC|PART)\s+([0-9IVX]+(?:[\s\-:.,&]+[A-Za-z0-9 ]{1,40})?)\b/gi;
+  // Regex finds the chapter keyword + number only; title extraction happens separately below.
+  const chapterRegex = /\b(CHAPTER|UNIT|MODULE|LESSON|TOPIC|PART)\s+([0-9IVX]+)\b/gi;
   
   const matches = [...text.matchAll(chapterRegex)];
   if (matches.length < 2) return [{ title: baseTitle, text }];
   
   const chaptersMap = new Map<string, { title: string, text: string }>();
   
-  // 1. Filter out inline references
+  // 1. Filter out inline references (e.g. "see Chapter 3", "covered in Unit 2")
   const validMatches = [];
   for (let i = 0; i < matches.length; i++) {
     const match = matches[i];
@@ -1050,7 +1118,7 @@ export function splitTextIntoChapters(text: string, baseTitle: string): { title:
     ? validMatches.filter(m => m.match[1].toUpperCase() === dominantPrefix)
     : validMatches;
 
-  // 3. Group by ID to merge TOC and actual chapters perfectly
+  // 3. Group by ID to merge TOC entries and actual chapter bodies
   for (let i = 0; i < filteredMatches.length; i++) {
     const { match } = filteredMatches[i];
     const nextMatch = filteredMatches[i + 1] ? filteredMatches[i + 1].match : null;
@@ -1060,19 +1128,25 @@ export function splitTextIntoChapters(text: string, baseTitle: string): { title:
     const chapterText = text.slice(startIndex, endIndex).trim();
 
     const type = match[1].toUpperCase();
-    const numMatch = match[2].trim().match(/^[0-9IVX]+/i);
-    const num = numMatch ? numMatch[0].toUpperCase() : match[2].trim().split(/[\s\-:.,&]+/)[0];
+    const num = match[2].toUpperCase();
     const chapterId = `${type} ${num}`; // e.g. "CHAPTER 1"
 
-    let header = match[0].trim().replace(/\s+/g, ' ');
-    header = header.replace(/^(CHAPTER|UNIT|MODULE|LESSON|TOPIC|PART)/i, (m) => m.charAt(0).toUpperCase() + m.slice(1).toLowerCase());
+    // Extract the full human-readable title by looking at text after the match
+    const matchEnd = match.index! + match[0].length;
+    const header = extractChapterTitle(match[1], num, matchEnd, text);
     
     // Ignore extremely short chunks (TOC artifacts)
     if (chapterText.length > 500) {
       const existing = chaptersMap.get(chapterId);
       if (existing) {
-        // Keep the longest title found for this chapter ID
-        const bestTitle = header.length > existing.title.length ? header : existing.title;
+        // Keep the most descriptive title (longest, or one that has ": Name" vs bare "Chapter N")
+        const existingHasName = existing.title.includes(':');
+        const headerHasName = header.includes(':');
+        const bestTitle = (headerHasName && !existingHasName)
+          ? header
+          : (!headerHasName && existingHasName)
+            ? existing.title
+            : header.length > existing.title.length ? header : existing.title;
         chaptersMap.set(chapterId, { title: bestTitle, text: existing.text + '\n\n' + chapterText });
       } else {
         chaptersMap.set(chapterId, { title: header, text: chapterText });

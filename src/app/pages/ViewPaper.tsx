@@ -3,11 +3,12 @@ import { useParams, useNavigate } from "react-router";
 import {
   Printer, Download, ArrowLeft, Loader2, Pencil,
   Check, X, Trash2, Plus, KeyRound, Eye, EyeOff,
-  ChevronDown, RefreshCw, Shuffle,
+  ChevronDown, RefreshCw, Shuffle, FileText,
 } from "lucide-react";
 import * as pdfService from "../services/pdfService";
 import { regenerateSection } from "../services/pdfService";
 import { exportPaperToPDF } from "../services/exportPdf";
+import { exportPaperToDocx } from "../services/exportDocx";
 import { toast } from "sonner";
 import ReactMarkdown from "react-markdown";
 import remarkMath from "remark-math";
@@ -176,7 +177,7 @@ function ExportDropdown({
   onExport,
   isExporting,
 }: {
-  onExport: (withKey: boolean) => void;
+  onExport: (format: "pdf" | "docx", withKey: boolean) => void;
   isExporting: boolean;
 }) {
   const [open, setOpen] = useState(false);
@@ -195,14 +196,14 @@ function ExportDropdown({
       <div className="flex">
         {/* Main button */}
         <button
-          onClick={() => onExport(false)}
+          onClick={() => onExport("pdf", false)}
           disabled={isExporting}
           className={`fm-btn-primary flex items-center gap-2 pl-5 pr-3 py-2 rounded-l-xl text-sm font-semibold
             ${isExporting ? "opacity-70 cursor-not-allowed" : ""}`}
         >
           {isExporting
             ? <><Loader2 className="w-4 h-4 animate-spin" /> Exporting…</>
-            : <><Download className="w-4 h-4" /> Export PDF</>}
+            : <><Download className="w-4 h-4" /> Export Paper</>}
         </button>
         {/* Chevron */}
         <button
@@ -218,30 +219,64 @@ function ExportDropdown({
 
       {open && (
         <div
-          className="absolute right-0 mt-1.5 w-56 rounded-xl shadow-xl z-20 overflow-hidden"
-          style={{ background: "rgba(25,36,41,0.97)", border: "1px solid rgba(148,180,156,0.2)" }}
+          className="absolute right-0 mt-1.5 w-64 rounded-xl shadow-xl z-20 overflow-hidden"
+          style={{ background: "rgba(25,36,41,0.98)", border: "1px solid rgba(148,180,156,0.25)" }}
         >
+          {/* PDF Section */}
+          <div className="px-3 py-1.5 bg-[rgba(82,125,111,0.1)] border-b border-[rgba(148,180,156,0.1)]">
+            <span className="text-[10px] font-bold tracking-wider text-[#94B49C] uppercase">PDF Document</span>
+          </div>
+          
           <button
-            onClick={() => { onExport(false); setOpen(false); }}
-            className="w-full flex items-center gap-3 px-4 py-3 text-sm text-[#D5E2D6]
+            onClick={() => { onExport("pdf", false); setOpen(false); }}
+            className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-[#D5E2D6]
               hover:bg-[rgba(82,125,111,0.15)] transition-colors text-left"
           >
             <Download className="w-4 h-4 text-[#94B49C] shrink-0" />
             <div>
-              <p className="font-medium">Question Paper</p>
-              <p className="text-xs text-[#527D6F]">No answers included</p>
+              <p className="font-medium text-xs">Question Paper</p>
+              <p className="text-[10px] text-[#527D6F]">No answers included</p>
             </div>
           </button>
-          <div style={{ borderTop: "1px solid rgba(148,180,156,0.1)" }} />
+          
           <button
-            onClick={() => { onExport(true); setOpen(false); }}
-            className="w-full flex items-center gap-3 px-4 py-3 text-sm text-[#D5E2D6]
+            onClick={() => { onExport("pdf", true); setOpen(false); }}
+            className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-[#D5E2D6]
               hover:bg-[rgba(82,125,111,0.15)] transition-colors text-left"
           >
             <KeyRound className="w-4 h-4 text-[#94B49C] shrink-0" />
             <div>
-              <p className="font-medium">With Answer Key</p>
-              <p className="text-xs text-[#527D6F]">Appends answers as last page</p>
+              <p className="font-medium text-xs">With Answer Key</p>
+              <p className="text-[10px] text-[#527D6F]">Appends answers as last page</p>
+            </div>
+          </button>
+
+          {/* Word Section */}
+          <div className="px-3 py-1.5 bg-[rgba(82,125,111,0.1)] border-t border-b border-[rgba(148,180,156,0.1)]">
+            <span className="text-[10px] font-bold tracking-wider text-[#94B49C] uppercase">Word Document (.docx)</span>
+          </div>
+
+          <button
+            onClick={() => { onExport("docx", false); setOpen(false); }}
+            className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-[#D5E2D6]
+              hover:bg-[rgba(82,125,111,0.15)] transition-colors text-left"
+          >
+            <FileText className="w-4 h-4 text-[#94B49C] shrink-0" />
+            <div>
+              <p className="font-medium text-xs">Question Paper</p>
+              <p className="text-[10px] text-[#527D6F]">Word format, editable</p>
+            </div>
+          </button>
+
+          <button
+            onClick={() => { onExport("docx", true); setOpen(false); }}
+            className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-[#D5E2D6]
+              hover:bg-[rgba(82,125,111,0.15)] transition-colors text-left"
+          >
+            <FileText className="w-4 h-4 text-[#94B49C] shrink-0" />
+            <div>
+              <p className="font-medium text-xs">With Answer Key</p>
+              <p className="text-[10px] text-[#527D6F]">Word format with answers</p>
             </div>
           </button>
         </div>
@@ -384,35 +419,49 @@ export function ViewPaper() {
     }
   };
 
-  const handleExport = async (withKey: boolean) => {
+  const handleExport = async (format: "pdf" | "docx", withKey: boolean) => {
     if (!paper) return;
 
-    // For STEM, we MUST use native browser print to render KaTeX math correctly
-    if (paper.subjectType === "math_physics" || paper.subjectType === "chemistry") {
-      if (withKey && !showAnswers) {
-        setShowAnswers(true);
-        toast.info("Answer key shown. Please save as PDF in the print dialog to preserve math formatting.", { duration: 5000 });
-        setTimeout(() => window.print(), 500);
-      } else if (!withKey && showAnswers) {
-        setShowAnswers(false);
-        toast.info("Answer key hidden. Please save as PDF in the print dialog to preserve math formatting.", { duration: 5000 });
-        setTimeout(() => window.print(), 500);
-      } else {
-        toast.info("Please select 'Save as PDF' in the print dialog. This perfectly preserves all math formulas!", { duration: 5000 });
-        window.print();
+    if (format === "pdf") {
+      // For STEM, we MUST use native browser print to render KaTeX math correctly in PDF
+      if (paper.subjectType === "math_physics" || paper.subjectType === "chemistry") {
+        if (withKey && !showAnswers) {
+          setShowAnswers(true);
+          toast.info("Answer key shown. Please save as PDF in the print dialog to preserve math formatting.", { duration: 5000 });
+          setTimeout(() => window.print(), 500);
+        } else if (!withKey && showAnswers) {
+          setShowAnswers(false);
+          toast.info("Answer key hidden. Please save as PDF in the print dialog to preserve math formatting.", { duration: 5000 });
+          setTimeout(() => window.print(), 500);
+        } else {
+          toast.info("Please select 'Save as PDF' in the print dialog. This perfectly preserves all math formulas!", { duration: 5000 });
+          window.print();
+        }
+        return;
       }
-      return;
-    }
 
-    setIsExporting(true);
-    try {
-      await exportPaperToPDF(paper, withKey);
-      toast.success(withKey ? "PDF with answer key downloaded!" : "PDF downloaded!");
-    } catch (err) {
-      console.error(err);
-      toast.error("Export failed. Please try again.");
-    } finally {
-      setIsExporting(false);
+      setIsExporting(true);
+      try {
+        await exportPaperToPDF(paper, withKey);
+        toast.success(withKey ? "PDF with answer key downloaded!" : "PDF downloaded!");
+      } catch (err) {
+        console.error(err);
+        toast.error("Export failed. Please try again.");
+      } finally {
+        setIsExporting(false);
+      }
+    } else {
+      // Word (.docx) export - supports unicode math directly!
+      setIsExporting(true);
+      try {
+        await exportPaperToDocx(paper, withKey);
+        toast.success(withKey ? "Word document with answer key downloaded!" : "Word document downloaded!");
+      } catch (err) {
+        console.error(err);
+        toast.error("Word export failed. Please try again.");
+      } finally {
+        setIsExporting(false);
+      }
     }
   };
 

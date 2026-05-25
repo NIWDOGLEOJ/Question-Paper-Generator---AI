@@ -40,21 +40,40 @@ export interface LMStudioConfig {
   contextChars: number;
 }
 
+function getDefaultApiUrl(): string {
+  if (typeof window !== 'undefined' && window.location.hostname.includes('trycloudflare.com')) {
+    return '/lm-studio-api/v1';
+  }
+  return 'http://localhost:1234/v1';
+}
+
 export function getLMStudioConfig(): LMStudioConfig {
+  const defaultUrl = getDefaultApiUrl();
   const stored = localStorage.getItem('lmStudioConfig');
   if (stored) {
     try {
       const parsed = JSON.parse(stored);
+      
+      // Transparent runtime override: if we are on trycloudflare.com but the config
+      // points to localhost (which would be blocked by mixed-content / wrong machine),
+      // silently redirect it to our secure public LM Studio tunnel link.
+      if (typeof window !== 'undefined' && window.location.hostname.includes('trycloudflare.com')) {
+        if (parsed.apiUrl && (parsed.apiUrl.includes('localhost') || parsed.apiUrl.includes('trycloudflare.com'))) {
+          parsed.apiUrl = '/lm-studio-api/v1';
+        }
+      }
+
       return {
         maxTokens:    parsed.maxTokens    ?? 2048,
         contextChars: parsed.contextChars ?? 6000,
+        apiUrl:       parsed.apiUrl       ?? defaultUrl,
         ...parsed,
       };
     } catch { /* fall through */ }
   }
   return {
     enabled:      false,
-    apiUrl:       'http://localhost:1234/v1',
+    apiUrl:       defaultUrl,
     model:        'local-model',
     apiToken:     '',
     maxTokens:    2048,
@@ -242,21 +261,26 @@ RULES:
 - Start immediately with "1."`;
 }
 
-// ── Core LLM call with timeout ──
-async function callLLM(prompt: string, config: LMStudioConfig): Promise<string> {
+// ── Core LLM call — streaming mode to avoid timeouts on slow local models ──
+async function callLLM(
+  prompt: string,
+  config: LMStudioConfig,
+  onChunk?: (partial: string) => void
+): Promise<string> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (config.apiToken) headers['Authorization'] = `Bearer ${config.apiToken}`;
 
   const controller = new AbortController();
-  // Generous timeout — local LLMs can be slow
-  const timer = setTimeout(() => controller.abort(), 120_000);
+  // 10-minute hard abort — streaming keeps the connection alive so this only
+  // fires if the model truly crashes mid-generation.
+  const timer = setTimeout(() => controller.abort(), 600_000);
 
   try {
     const payload: any = {
       messages:    [{ role: 'user', content: prompt }],
       temperature: 0.3,
       max_tokens:  config.maxTokens,
-      stream:      false,
+      stream:      true,   // ← streaming: tokens arrive continuously, no connection timeout
     };
     if (config.model && config.model !== 'local-model') {
       payload.model = config.model;
@@ -287,16 +311,47 @@ async function callLLM(prompt: string, config: LMStudioConfig): Promise<string> 
       throw new Error(`LM Studio error ${res.status}: ${body.slice(0, 200)}`);
     }
 
-    const data = await res.json();
-    const text = data.choices?.[0]?.message?.content ?? '';
-    if (!text.trim()) {
+    // ── Read the SSE stream ──
+    const reader = res.body?.getReader();
+    if (!reader) throw new Error('LM Studio returned no response body.');
+
+    const decoder = new TextDecoder();
+    let full = '';
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      // SSE lines are separated by "\n\n"; each line is "data: {...}"
+      const lines = buffer.split('\n');
+      buffer = lines.pop() ?? ''; // keep incomplete last line
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || !trimmed.startsWith('data:')) continue;
+        const json = trimmed.slice(5).trim();
+        if (json === '[DONE]') break;
+        try {
+          const parsed = JSON.parse(json);
+          const delta = parsed.choices?.[0]?.delta?.content ?? '';
+          if (delta) {
+            full += delta;
+            onChunk?.(full);
+          }
+        } catch { /* skip malformed SSE lines */ }
+      }
+    }
+
+    if (!full.trim()) {
       throw new Error(
         'LM Studio returned an empty response. ' +
         'The model may have run out of memory mid-generation. ' +
         'Try reducing Max Tokens or switching to a smaller model.'
       );
     }
-    return text;
+    return full;
   } finally {
     clearTimeout(timer);
   }

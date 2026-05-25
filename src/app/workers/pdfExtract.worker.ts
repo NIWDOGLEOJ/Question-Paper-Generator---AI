@@ -17,10 +17,18 @@ async function extractPageText(
   try {
     const page    = await pdf.getPage(pageNum);
     const content = await page.getTextContent();
-    const raw     = content.items
-      .map((item: any) => ('str' in item ? item.str : ''))
-      .join(' ')
-      .replace(/\s+/g, ' ')
+    // pdfjs items carry `hasEOL` which marks the end of a visual line.
+    // Emitting \n there gives us real line structure for chapter detection.
+    const parts: string[] = [];
+    for (const item of content.items as any[]) {
+      if (!('str' in item)) continue;
+      parts.push(item.str);
+      if (item.hasEOL) parts.push('\n');
+      else if (item.str && !item.str.endsWith(' ')) parts.push(' ');
+    }
+    const raw = parts.join('')
+      .replace(/[ \t]+/g, ' ')
+      .replace(/\n{3,}/g, '\n\n')
       .trim();
     return raw.slice(0, MAX_CHARS_PER_PAGE);
   } catch {

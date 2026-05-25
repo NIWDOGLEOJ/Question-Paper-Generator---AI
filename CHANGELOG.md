@@ -5,6 +5,32 @@ All notable changes to the Question Paper Generator will be documented in this f
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-05-24
+
+### Fixed
+- **Chapter title extraction** — chapter names in the Source Material library were showing as bare
+  `"Chapter 1"` / `"Unit 2"` instead of the actual title (e.g. `"Chapter 1: Atoms and Molecules"`).
+  Root cause: the PDF text was a flat space-joined blob with no line breaks, so the title-extraction
+  logic had nothing to read. Two-part fix:
+  1. `pdfService.ts` and `pdfExtract.worker.ts` now use pdfjs's `hasEOL` flag on each text item to
+     emit real `\n` characters, preserving the visual line structure of the PDF.
+  2. `extractChapterTitle()` reads the next non-empty line after each chapter marker and applies
+     proper Title Case formatting (ALL-CAPS headings are converted to readable case).
+- **LM Studio generation timeout** — large prompts (10+ questions, STEM subjects, 6000 context chars)
+  would silently hang for 2–5 minutes and then fail with a timeout error.
+  Root cause: `stream: false` made the app wait in silence for the entire response before receiving
+  any data, allowing the browser's connection idle timer to fire.
+  Fix: switched `callLLM()` to `stream: true` (Server-Sent Events). Tokens arrive continuously so
+  the connection stays alive regardless of model speed. Hard abort raised from 120 s → 10 minutes.
+
+### Changed
+- `callLLM()` now reads the SSE stream incrementally and accepts an optional `onChunk` callback for
+  future live streaming UI.
+- Elapsed-time counter added to the Step 3 generating screen — shows `5s`, `1m 23s`, etc. next to
+  the "LM Studio Active" badge so users can see the model is working.
+- `extractChapterTitle()` now handles three PDF layouts: inline colon separator, same-line dash
+  separator, and title on its own next line.
+
 ## [1.0.0] - 2026-04-22
 
 ### Added
@@ -71,10 +97,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Complete project documentation
 
 ### Known Limitations
-- PDFs must contain actual text (scanned PDFs without OCR not supported)
-- Maximum PDF size: 50MB
+- PDFs must contain actual text (scanned PDFs without OCR not supported in v1.0; OCR added in v1.1)
+- Maximum PDF size: 50 MB
 - LM Studio requires CORS to be enabled
-- Works only in modern browsers with localStorage support
+- Works only in modern browsers with localStorage / IndexedDB support
 - No cloud sync (local-only storage)
 
 ## [Unreleased]
@@ -104,6 +130,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Patch** (0.0.X): Bug fixes, minor improvements
 
 ### Support
-- Current version: 1.0.0
+- Current version: 1.3.0
 - Minimum browser requirements: Chrome 90+, Firefox 88+, Safari 14+, Edge 90+
-- Node.js: 16+ required for development
+- Node.js: 18+ required for development

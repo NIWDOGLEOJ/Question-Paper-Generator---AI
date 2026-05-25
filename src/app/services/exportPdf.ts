@@ -38,6 +38,114 @@ function wrapText(doc: jsPDF, text: string, maxWidth: number, fontSize: number):
   return doc.splitTextToSize(text, maxWidth) as string[];
 }
 
+// ── LaTeX → readable plain-text for jsPDF (which cannot render LaTeX) ──
+// Converts the most common constructs the LLM produces into unicode/ASCII equivalents.
+export function stripLatex(raw: string): string {
+  let s = raw;
+
+  // 1. Remove display math delimiters $$ ... $$ and block \[ ... \]
+  s = s.replace(/\$\$([\s\S]*?)\$\$/g, (_, inner) => convertLatexMath(inner.trim()));
+  s = s.replace(/\\\[([\s\S]*?)\\\]/g, (_, inner) => convertLatexMath(inner.trim()));
+  // 2. Remove inline math delimiters $ ... $ and \( ... \)
+  s = s.replace(/\$([\s\S]*?)\$/g,      (_, inner) => convertLatexMath(inner.trim()));
+  s = s.replace(/\\\(([\s\S]*?)\\\)/g,  (_, inner) => convertLatexMath(inner.trim()));
+
+  return s.trim();
+}
+
+function convertLatexMath(s: string): string {
+  // \frac{a}{b}  →  (a)/(b)
+  // Handles nested braces one level deep by iterating
+  for (let i = 0; i < 5; i++) {
+    s = s.replace(/\\frac\{([^{}]*)\}\{([^{}]*)\}/g, '($1)/($2)');
+  }
+
+  // \sqrt{x}  →  √x
+  s = s.replace(/\\sqrt\{([^{}]*)\}/g, '√($1)');
+  s = s.replace(/\\sqrt\s+(\S)/g, '√$1');
+
+  // Superscripts: x^{n}  →  x^n  then convert single-digit/letter supers to unicode
+  s = s.replace(/\^\{([^{}]+)\}/g, (_, e) => toSuperscript(e));
+  s = s.replace(/\^([0-9a-z])/g,   (_, c) => toSuperscript(c));
+
+  // Subscripts: x_{n}  →  unicode subscript where possible
+  s = s.replace(/_\{([^{}]+)\}/g, (_, e) => toSubscript(e));
+  s = s.replace(/_([0-9a-z])/g,   (_, c) => toSubscript(c));
+
+  // Greek letters
+  const greek: Record<string, string> = {
+    alpha: 'α', beta: 'β', gamma: 'γ', delta: 'δ', epsilon: 'ε', zeta: 'ζ',
+    eta: 'η', theta: 'θ', iota: 'ι', kappa: 'κ', lambda: 'λ', mu: 'μ',
+    nu: 'ν', xi: 'ξ', pi: 'π', rho: 'ρ', sigma: 'σ', tau: 'τ',
+    upsilon: 'υ', phi: 'φ', chi: 'χ', psi: 'ψ', omega: 'ω',
+    Alpha: 'Α', Beta: 'Β', Gamma: 'Γ', Delta: 'Δ', Theta: 'Θ', Lambda: 'Λ',
+    Mu: 'Μ', Pi: 'Π', Sigma: 'Σ', Phi: 'Φ', Psi: 'Ψ', Omega: 'Ω',
+  };
+  for (const [cmd, ch] of Object.entries(greek)) {
+    s = s.replace(new RegExp(`\\\\${cmd}\\b`, 'g'), ch);
+  }
+
+  // Common operators and symbols
+  const ops: [RegExp, string][] = [
+    [/\\cdot/g, '·'],      [/\\times/g, '×'],   [/\\div/g, '÷'],
+    [/\\pm/g, '±'],        [/\\mp/g, '∓'],       [/\\leq/g, '≤'],
+    [/\\geq/g, '≥'],       [/\\neq/g, '≠'],      [/\\approx/g, '≈'],
+    [/\\infty/g, '∞'],     [/\\sum/g, 'Σ'],      [/\\prod/g, 'Π'],
+    [/\\int/g, '∫'],       [/\\partial/g, '∂'],  [/\\nabla/g, '∇'],
+    [/\\in/g, '∈'],        [/\\notin/g, '∉'],    [/\\subset/g, '⊂'],
+    [/\\supset/g, '⊃'],   [/\\cup/g, '∪'],       [/\\cap/g, '∩'],
+    [/\\rightarrow/g, '→'],[/\\leftarrow/g, '←'],[/\\Rightarrow/g, '⇒'],
+    [/\\Leftrightarrow/g, '⟺'],[/\\to/g, '→'],  [/\\ldots/g, '…'],
+    [/\\cdots/g, '⋯'],    [/\\forall/g, '∀'],   [/\\exists/g, '∃'],
+    [/\\lim/g, 'lim'],     [/\\log/g, 'log'],    [/\\ln/g, 'ln'],
+    [/\\sin/g, 'sin'],     [/\\cos/g, 'cos'],    [/\\tan/g, 'tan'],
+    [/\\le\b/g, '≤'],      [/\\ge\b/g, '≥'],     [/\\ne\b/g, '≠'],
+  ];
+  for (const [pat, rep] of ops) s = s.replace(pat, rep);
+
+  // \text{...}  →  just the text
+  s = s.replace(/\\text\{([^{}]*)\}/g, '$1');
+  s = s.replace(/\\mathrm\{([^{}]*)\}/g, '$1');
+  s = s.replace(/\\mathbf\{([^{}]*)\}/g, '$1');
+  s = s.replace(/\\mathit\{([^{}]*)\}/g, '$1');
+
+  // \left( \right)  →  plain parens
+  s = s.replace(/\\left\s*([([{|])/g, '$1');
+  s = s.replace(/\\right\s*([)\]}|])/g, '$1');
+
+  // Strip remaining unknown backslash commands (\cmd or \cmd{...})
+  s = s.replace(/\\[a-zA-Z]+\{([^{}]*)\}/g, '$1');
+  s = s.replace(/\\[a-zA-Z]+/g, '');
+
+  // Cleanup stray braces and extra whitespace
+  s = s.replace(/[{}]/g, '');
+  s = s.replace(/\s{2,}/g, ' ');
+
+  return s.trim();
+}
+
+const SUPER_MAP: Record<string, string> = {
+  '0':'⁰','1':'¹','2':'²','3':'³','4':'⁴','5':'⁵','6':'⁶','7':'⁷','8':'⁸','9':'⁹',
+  'a':'ᵃ','b':'ᵇ','c':'ᶜ','d':'ᵈ','e':'ᵉ','f':'ᶠ','g':'ᵍ','h':'ʰ','i':'ⁱ',
+  'j':'ʲ','k':'ᵏ','l':'ˡ','m':'ᵐ','n':'ⁿ','o':'ᵒ','p':'ᵖ','r':'ʳ','s':'ˢ',
+  't':'ᵗ','u':'ᵘ','v':'ᵛ','w':'ʷ','x':'ˣ','y':'ʸ','z':'ᶻ',
+  '+':'⁺','-':'⁻','=':'⁼','(':'⁽',')':'⁾',
+};
+const SUB_MAP: Record<string, string> = {
+  '0':'₀','1':'₁','2':'₂','3':'₃','4':'₄','5':'₅','6':'₆','7':'₇','8':'₈','9':'₉',
+  'a':'ₐ','e':'ₑ','i':'ᵢ','j':'ⱼ','k':'ₖ','l':'ₗ','m':'ₘ','n':'ₙ','o':'ₒ',
+  'p':'ₚ','r':'ᵣ','s':'ₛ','t':'ₜ','u':'ᵤ','v':'ᵥ','x':'ₓ',
+  '+':'₊','-':'₋','=':'₌','(':'₍',')':'₎',
+};
+
+function toSuperscript(s: string): string {
+  return [...s].map(c => SUPER_MAP[c] ?? `^${c}`).join('');
+}
+function toSubscript(s: string): string {
+  return [...s].map(c => SUB_MAP[c] ?? `_${c}`).join('');
+}
+
+
 function hRule(doc: jsPDF, y: number, color: [number, number, number], thickness = 0.4) {
   doc.setDrawColor(...color);
   doc.setLineWidth(thickness);
@@ -122,9 +230,11 @@ function renderBody(doc: jsPDF, paper: Paper): { y: number; pageNum: number } {
         ? `[${q.marks} mark${q.marks !== 1 ? 's' : ''}]`
         : '';
 
+      const qText = stripLatex(q.text);
+
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(FS.question);
-      const qLines = wrapText(doc, q.text, qWidth - (marksLabel ? 18 : 0), FS.question);
+      const qLines = wrapText(doc, qText, qWidth - (marksLabel ? 18 : 0), FS.question);
 
       const optH   = q.options
         ? (q.options.length === 2 ? 6 : Math.ceil(q.options.length / 2) * 5.5 + 2)
@@ -165,18 +275,39 @@ function renderBody(doc: jsPDF, paper: Paper): { y: number; pageNum: number } {
           doc.text('a) True        b) False', indent + 2, y);
           y += 5.5;
         } else {
-          const colW = (CONTENT_W - 7) / 2;
-          for (let oi = 0; oi < q.options.length; oi++) {
-            const col      = oi % 2;
-            const xPos     = indent + 2 + col * colW;
-            const optLines = wrapText(doc, `${labels[oi]}) ${q.options[oi]}`, colW - 4, FS.option);
-            doc.setFont('helvetica', 'normal');
-            doc.setFontSize(FS.option);
-            doc.setTextColor(...C.darkGrey);
-            doc.text(optLines, xPos, y);
-            if (col === 1 || oi === q.options.length - 1) y += optLines.length * 5;
+          // Detect if any option has math content — if so use 1-per-line layout
+          // to avoid overflow of long expressions like "(dy/dx)dx"
+          const cleanedOpts = q.options.map(o => stripLatex(o));
+          const hasMath = cleanedOpts.some(o =>
+            /[/√∫∂²³⁰⁴⁵⁶⁷⁸⁹₀₁₂₃₄₅₆₇₈₉αβγδεθλμπσφωΩΣΔΓΠ]/.test(o)
+          );
+
+          if (hasMath) {
+            // One option per line — prevents math expressions from overflowing
+            for (let oi = 0; oi < cleanedOpts.length; oi++) {
+              const optLines = wrapText(doc, `${labels[oi]}) ${cleanedOpts[oi]}`, CONTENT_W - 14, FS.option);
+              doc.setFont('helvetica', 'normal');
+              doc.setFontSize(FS.option);
+              doc.setTextColor(...C.darkGrey);
+              doc.text(optLines, indent + 2, y);
+              y += optLines.length * 5;
+            }
+            y += 1;
+          } else {
+            // 2-column grid for short options (no math)
+            const colW = (CONTENT_W - 7) / 2;
+            for (let oi = 0; oi < cleanedOpts.length; oi++) {
+              const col      = oi % 2;
+              const xPos     = indent + 2 + col * colW;
+              const optLines = wrapText(doc, `${labels[oi]}) ${cleanedOpts[oi]}`, colW - 4, FS.option);
+              doc.setFont('helvetica', 'normal');
+              doc.setFontSize(FS.option);
+              doc.setTextColor(...C.darkGrey);
+              doc.text(optLines, xPos, y);
+              if (col === 1 || oi === cleanedOpts.length - 1) y += optLines.length * 5;
+            }
+            y += 1;
           }
-          y += 1;
         }
       }
 
@@ -264,7 +395,7 @@ function renderAnswerKey(doc: jsPDF, paper: Paper): void {
     for (let qi = 0; qi < section.questions.length; qi++) {
       const q   = section.questions[qi];
       globalQ++;
-      const ans = (q.answer ?? '').trim();
+      const ans = stripLatex((q.answer ?? '').trim());
       if (!ans) continue;
 
       ensureSpace(10);
