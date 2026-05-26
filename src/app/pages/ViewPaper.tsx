@@ -3,7 +3,8 @@ import { useParams, useNavigate } from "react-router";
 import {
   Printer, Download, ArrowLeft, Loader2, Pencil,
   Check, X, Trash2, Plus, KeyRound, Eye, EyeOff,
-  ChevronDown, RefreshCw, Shuffle, FileText,
+  ChevronDown, RefreshCw, Shuffle, FileText, Settings,
+  Type, AlignJustify, LayoutGrid, GripVertical,
 } from "lucide-react";
 import * as pdfService from "../services/pdfService";
 import { regenerateSection } from "../services/pdfService";
@@ -109,14 +110,14 @@ function EditableText({
   return (
     <span className={`group/e inline-block w-full ${className}`}>
       {value
-        ? <span style={{ fontFamily: multiline ? "'Georgia', serif" : undefined }} className="math-markdown inline-block w-[calc(100%-24px)] align-top">
+        ? <span style={{ fontFamily: multiline ? "'Georgia', serif" : undefined }} className="math-markdown inline-block w-[calc(100%-24px)] align-top overflow-x-auto max-w-full pb-0.5 scrollbar-none">
             <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]} components={{ p: 'span' }}>
               {value}
             </ReactMarkdown>
           </span>
         : <span className="text-gray-400 italic text-xs">{placeholder}</span>}
       <button onClick={open} title="Edit"
-        className="ml-1.5 inline-flex items-center opacity-0 group-hover/e:opacity-100
+        className="ml-1.5 inline-flex items-center lg:opacity-0 group-hover/e:lg:opacity-100 group-hover/e:opacity-100
           transition-opacity text-[#94B49C] hover:text-[#527D6F]">
         <Pencil className="w-3.5 h-3.5" />
       </button>
@@ -299,6 +300,113 @@ export function ViewPaper() {
   const [showAnswers, setShowAnswers] = useState(false);
   const [regeneratingIdx, setRegeneratingIdx] = useState<number | null>(null);
 
+  // ── Styling Customizer States ──
+  const [spacing, setSpacing]         = useState<"tight" | "normal" | "loose">("normal");
+  const [fontSize, setFontSize]       = useState<"sm" | "base" | "lg">("base");
+  const [mcqCols, setMcqCols]         = useState<number>(2);
+  const [showMarks, setShowMarks]     = useState(true);
+  const [showLines, setShowLines]     = useState(true);
+  const [hideInstructions, setHideInstructions] = useState(false);
+  const [showMobileStyles, setShowMobileStyles] = useState(false);
+
+  // ── Drag and Drop States ──
+  const [draggedItem, setDraggedItem] = useState<{ sIdx: number; qIdx: number } | null>(null);
+  const [dragOverItem, setDragOverItem] = useState<{ sIdx: number; qIdx: number } | null>(null);
+  const [draggedSectionIdx, setDraggedSectionIdx] = useState<number | null>(null);
+  const [dragOverSectionIdx, setDragOverSectionIdx] = useState<number | null>(null);
+
+  // ── Drag and Drop Handlers for Questions ──
+  const handleDragStart = (sIdx: number, qIdx: number) => {
+    setDraggedItem({ sIdx, qIdx });
+  };
+
+  const handleDragOver = (e: React.DragEvent, sIdx: number, qIdx: number) => {
+    e.preventDefault();
+    setDragOverItem({ sIdx, qIdx });
+  };
+
+  const handleDrop = (e: React.DragEvent, targetSIdx: number, targetQIdx: number) => {
+    e.preventDefault();
+    if (!draggedItem) return;
+
+    const sourceSIdx = draggedItem.sIdx;
+    const sourceQIdx = draggedItem.qIdx;
+
+    if (sourceSIdx === targetSIdx && sourceQIdx === targetQIdx) {
+      setDraggedItem(null);
+      setDragOverItem(null);
+      return;
+    }
+
+    mutatePaper(p => {
+      const sourceSec = p.sections[sourceSIdx];
+      const targetSec = p.sections[targetSIdx];
+
+      // Remove from source
+      const [question] = sourceSec.questions.splice(sourceQIdx, 1);
+
+      // Insert into target
+      targetSec.questions.splice(targetQIdx, 0, question);
+
+      // Re-index all IDs sequentially
+      p.sections.forEach((sec, s) => {
+        sec.questions.forEach((questionItem, qIdx) => {
+          questionItem.id = s * 100 + qIdx + 1;
+        });
+      });
+    });
+
+    setDraggedItem(null);
+    setDragOverItem(null);
+    toast.success("Question rearranged");
+  };
+
+  const handleDragEnd = () => {
+    setDraggedItem(null);
+    setDragOverItem(null);
+  };
+
+  // ── Drag and Drop Handlers for Entire Sections ──
+  const handleSectionDragStart = (sIdx: number) => {
+    setDraggedSectionIdx(sIdx);
+  };
+
+  const handleSectionDragOver = (e: React.DragEvent, sIdx: number) => {
+    e.preventDefault();
+    setDragOverSectionIdx(sIdx);
+  };
+
+  const handleSectionDrop = (e: React.DragEvent, targetSIdx: number) => {
+    e.preventDefault();
+    if (draggedSectionIdx === null) return;
+    if (draggedSectionIdx === targetSIdx) {
+      setDraggedSectionIdx(null);
+      setDragOverSectionIdx(null);
+      return;
+    }
+
+    mutatePaper(p => {
+      const [section] = p.sections.splice(draggedSectionIdx, 1);
+      p.sections.splice(targetSIdx, 0, section);
+
+      // Re-index all IDs sequentially
+      p.sections.forEach((sec, s) => {
+        sec.questions.forEach((questionItem, qIdx) => {
+          questionItem.id = s * 100 + qIdx + 1;
+        });
+      });
+    });
+
+    setDraggedSectionIdx(null);
+    setDragOverSectionIdx(null);
+    toast.success("Section rearranged");
+  };
+
+  const handleSectionDragEnd = () => {
+    setDraggedSectionIdx(null);
+    setDragOverSectionIdx(null);
+  };
+
   useEffect(() => {
     if (id) {
       const found = pdfService.getPaper(id);
@@ -403,7 +511,10 @@ export function ViewPaper() {
   const handleRegenerate = async (sIdx: number) => {
     if (!paper) return;
     if (!paper.sourceText) {
-      toast.error("No source text stored. Re-generate this paper from the original PDF to enable section regeneration.");
+      const msg = paper.isPromptMode || paper.sourceFile === 'Custom Prompt'
+        ? "No prompt text stored for this paper."
+        : "No source text stored. Re-generate this paper from the original PDF to enable section regeneration.";
+      toast.error(msg);
       return;
     }
     setRegeneratingIdx(sIdx);
@@ -472,6 +583,19 @@ export function ViewPaper() {
     ? paper.sections.reduce((a, s) => a + s.questions.filter(q => q.answer?.trim()).length, 0)
     : 0;
 
+  const paperFontSizeClass = fontSize === "sm" ? "text-sm" : fontSize === "lg" ? "text-lg" : "text-base";
+  const h1Class = fontSize === "sm" ? "text-xl sm:text-2xl" : fontSize === "lg" ? "text-3xl sm:text-4xl" : "text-2xl sm:text-3xl";
+  const h2Class = fontSize === "sm" ? "text-sm sm:text-base" : fontSize === "lg" ? "text-lg sm:text-xl" : "text-base sm:text-lg";
+  const h3Class = fontSize === "sm" ? "text-xs sm:text-sm" : fontSize === "lg" ? "text-base sm:text-lg" : "text-sm sm:text-base";
+  const sectionSpacingClass = spacing === "tight" ? "space-y-6" : spacing === "loose" ? "space-y-16" : "space-y-12";
+  const questionSpacingClass = spacing === "tight" ? "space-y-3" : spacing === "loose" ? "space-y-9" : "space-y-6";
+  
+  const mcqColsClass = mcqCols === 1 
+    ? "grid-cols-1" 
+    : mcqCols === 4 
+      ? "grid-cols-1 sm:grid-cols-2 md:grid-cols-4 print:grid-cols-4" 
+      : "grid-cols-1 sm:grid-cols-2 md:grid-cols-2 print:grid-cols-2";
+
   if (isLoading) {
     return (
       <div className="min-h-full flex items-center justify-center">
@@ -481,249 +605,351 @@ export function ViewPaper() {
   }
 
   return (
-    <div className="min-h-full py-8 px-4 sm:px-6 lg:px-8 print:p-0 fm-fadein">
-      <div className="max-w-4xl mx-auto space-y-5 print:space-y-0">
+    <div className="min-h-full py-6 sm:py-8 px-4 sm:px-6 lg:px-8 print:p-0 fm-fadein">
+      <div className="max-w-7xl mx-auto flex flex-col xl:flex-row gap-6 items-stretch print:space-y-0 print:gap-0">
+        
+        {/* Left side: Action bar, Hint banner, Paper sheet */}
+        <div className="flex-1 space-y-5 print:space-y-0">
+          
+          {/* Action bar */}
+          <div className="fm-glass rounded-2xl px-4 sm:px-5 py-4 flex flex-col md:flex-row md:items-center justify-between gap-4 print:hidden">
+            <button onClick={() => navigate("/")}
+              className="flex items-center gap-2 text-sm font-medium text-[#94B49C] hover:text-[#D5E2D6] transition-colors self-start">
+              <ArrowLeft className="w-4 h-4" /> Back to Dashboard
+            </button>
 
-        {/* ── Action bar ── */}
-        <div className="fm-glass rounded-2xl px-5 py-3 flex items-center justify-between print:hidden">
-          <button onClick={() => navigate("/")}
-            className="flex items-center gap-2 text-sm font-medium text-[#94B49C] hover:text-[#D5E2D6] transition-colors">
-            <ArrowLeft className="w-4 h-4" /> Back to Dashboard
-          </button>
+            <div className="flex gap-2 items-center flex-wrap justify-start md:justify-end w-full md:w-auto">
+              {isDirty && (
+                <button onClick={saveChanges}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold
+                    text-white bg-[#527D6F] hover:bg-[#3e6358] transition-colors animate-pulse">
+                  <Check className="w-4 h-4" /> Save Changes
+                </button>
+              )}
 
-          <div className="flex gap-2 items-center flex-wrap justify-end">
-            {isDirty && (
-              <button onClick={saveChanges}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold
-                  text-white bg-[#527D6F] hover:bg-[#3e6358] transition-colors animate-pulse">
-                <Check className="w-4 h-4" /> Save Changes
+              {/* Mobile styles toggle */}
+              <button
+                onClick={() => setShowMobileStyles(s => !s)}
+                className={`xl:hidden flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium transition-all
+                  ${showMobileStyles
+                    ? "text-white bg-[#527D6F]"
+                    : "text-[#94B49C] hover:bg-[rgba(82,125,111,0.12)]"}`}
+                style={showMobileStyles ? {} : { border: "1px solid rgba(148,180,156,0.2)" }}
+              >
+                <Settings className="w-4 h-4" /> Styles
               </button>
-            )}
 
-            {/* Shuffle all sections */}
-            <button
-              onClick={shuffleAll}
-              title="Shuffle questions in all sections"
-              className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium
-                text-[#94B49C] hover:bg-[rgba(82,125,111,0.12)] transition-all"
-              style={{ border: "1px solid rgba(148,180,156,0.2)" }}
-            >
-              <Shuffle className="w-4 h-4" /> Shuffle All
-            </button>
+              {/* Shuffle all sections */}
+              <button
+                onClick={shuffleAll}
+                title="Shuffle questions in all sections"
+                className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium
+                  text-[#94B49C] hover:bg-[rgba(82,125,111,0.12)] transition-all"
+                style={{ border: "1px solid rgba(148,180,156,0.2)" }}
+              >
+                <Shuffle className="w-4 h-4" /> Shuffle All
+              </button>
 
-            {/* Answer key toggle */}
-            <button
-              onClick={() => setShowAnswers(a => !a)}
-              className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium transition-all
-                ${showAnswers
-                  ? "text-white bg-[#527D6F] hover:bg-[#3e6358]"
-                  : "text-[#94B49C] hover:bg-[rgba(82,125,111,0.12)]"}`}
-              style={showAnswers ? {} : { border: "1px solid rgba(148,180,156,0.2)" }}
-            >
-              <KeyRound className="w-4 h-4" />
-              {showAnswers ? "Hide Answers" : "Answer Key"}
-              {answeredCount > 0 && !showAnswers && (
-                <span className="ml-1 text-xs px-1.5 py-0.5 rounded-full font-semibold"
-                  style={{ background: "rgba(82,125,111,0.2)", color: "#94B49C" }}>
-                  {answeredCount}/{totalQuestions}
-                </span>
-              )}
-            </button>
+              {/* Answer key toggle */}
+              <button
+                onClick={() => setShowAnswers(a => !a)}
+                className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium transition-all
+                  ${showAnswers
+                    ? "text-white bg-[#527D6F] hover:bg-[#3e6358]"
+                    : "text-[#94B49C] hover:bg-[rgba(82,125,111,0.12)]"}`}
+                style={showAnswers ? {} : { border: "1px solid rgba(148,180,156,0.2)" }}
+              >
+                <KeyRound className="w-4 h-4" />
+                <span>{showAnswers ? "Hide Answers" : "Answer Key"}</span>
+                {answeredCount > 0 && !showAnswers && (
+                  <span className="ml-1 text-xs px-1.5 py-0.5 rounded-full font-semibold"
+                    style={{ background: "rgba(82,125,111,0.2)", color: "#94B49C" }}>
+                    {answeredCount}/{totalQuestions}
+                  </span>
+                )}
+              </button>
 
-            <button onClick={() => window.print()}
-              className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium text-[#94B49C]
-                transition-all hover:bg-[rgba(82,125,111,0.12)]"
-              style={{ border: "1px solid rgba(148,180,156,0.2)" }}>
-              <Printer className="w-4 h-4" /> Print
-            </button>
+              <button onClick={() => window.print()}
+                className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium text-[#94B49C]
+                  transition-all hover:bg-[rgba(82,125,111,0.12)]"
+                style={{ border: "1px solid rgba(148,180,156,0.2)" }}>
+                <Printer className="w-4 h-4" /> Print
+              </button>
 
-            <ExportDropdown onExport={handleExport} isExporting={isExporting} />
-          </div>
-        </div>
-
-        {/* ── Hint banner ── */}
-        <div
-          className="print:hidden flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs text-[#94B49C]"
-          style={{ background: "rgba(82,125,111,0.08)", border: "1px solid rgba(148,180,156,0.15)" }}
-        >
-          {showAnswers ? (
-            <>
-              <KeyRound className="w-3.5 h-3.5 shrink-0 text-[#94B49C]" />
-              {answeredCount > 0
-                ? <><strong className="mr-0.5">{answeredCount}/{totalQuestions}</strong> answers auto-generated. Click any <strong className="mx-0.5">pencil</strong> to edit. For MCQ, the correct option is highlighted in green.</>
-                : <>Answer key mode — click the pencil next to each <strong className="mx-0.5">Answer</strong> field to fill in the correct answer.</>
-              }
-              {" "}Use <strong className="mx-0.5">Export PDF → With Answer Key</strong> to download.
-              <span className="ml-2 px-2 py-0.5 rounded text-[11px] font-medium bg-[#94B49C]/20 text-[#3e6358]">
-                💡 For complex math, use <strong>Print → Save as PDF</strong> instead of Export.
-              </span>
-            </>
-          ) : (
-            <>
-              <Pencil className="w-3.5 h-3.5 shrink-0" />
-              Hover over any question or option and click the <strong className="mx-0.5">pencil icon</strong> to edit.
-              Use <strong className="mx-0.5">+</strong> to add and <strong className="mx-0.5">✕</strong> to delete questions.
-              <span className="ml-2 px-2 py-0.5 rounded text-[11px] font-medium bg-[#94B49C]/20 text-[#3e6358]">
-                💡 For complex math, use <strong>Print → Save as PDF</strong> instead of Export.
-              </span>
-              {answeredCount > 0 && (
-                <span className="ml-auto shrink-0 font-medium" style={{ color: "#94B49C" }}>
-                  {answeredCount}/{totalQuestions} answers ready
-                </span>
-              )}
-            </>
-          )}
-        </div>
-
-        {/* ── The paper ── */}
-        <div
-          className="rounded-2xl p-10 sm:p-16 print:shadow-none print:rounded-none print:p-0"
-          style={{ background: "#fff", color: "#1a1a1a", fontFamily: "'Georgia', serif" }}
-        >
-          {/* Header */}
-          <div className="text-center border-b-2 border-gray-800 pb-6 mb-8">
-            <h1 className="text-3xl font-bold uppercase tracking-widest">{paper!.subject}</h1>
-            <h2 className="text-xl mt-2 font-medium text-gray-600">{paper!.title}</h2>
-            <div className="flex justify-between mt-6 text-sm font-semibold text-gray-600">
-              <span>Time Allowed: {paper!.duration}</span>
-              <span>Total Marks: {paper!.totalMarks}</span>
+              <ExportDropdown onExport={handleExport} isExporting={isExporting} />
             </div>
           </div>
 
-          {/* Sections */}
-          <div className="space-y-12">
-            {paper!.sections.map((section, sIdx) => (
-              <div key={sIdx}>
-                <div className="flex items-center justify-between mb-1">
-                  <h3 className="text-lg font-bold underline decoration-gray-400 underline-offset-4">
-                    {section.name}
-                  </h3>
-                  <div className="flex items-center gap-2 print:hidden">
-                    {/* Per-section shuffle */}
-                    <button
-                      onClick={() => shuffleSection(sIdx)}
-                      disabled={regeneratingIdx !== null}
-                      title={`Shuffle questions in ${section.name}`}
-                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold
-                        transition-all
-                        ${regeneratingIdx !== null
-                          ? "text-[#3a5560] cursor-not-allowed opacity-50"
-                          : "text-[#527D6F] hover:text-[#94B49C] hover:bg-[rgba(82,125,111,0.1)]"
-                        }`}
-                      style={{ border: "1px solid rgba(148,180,156,0.18)" }}
-                    >
-                      <Shuffle className="w-3.5 h-3.5" /> Shuffle
-                    </button>
-
-                    {/* Regenerate */}
-                    <button
-                      onClick={() => handleRegenerate(sIdx)}
-                      disabled={regeneratingIdx !== null}
-                      title={`Regenerate ${section.name} questions`}
-                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold
-                        transition-all
-                        ${regeneratingIdx === sIdx
-                          ? "text-[#94B49C] bg-[rgba(82,125,111,0.15)] cursor-wait"
-                          : regeneratingIdx !== null
-                          ? "text-[#3a5560] cursor-not-allowed opacity-50"
-                          : "text-[#527D6F] hover:text-[#94B49C] hover:bg-[rgba(82,125,111,0.1)]"
-                        }`}
-                      style={{ border: "1px solid rgba(148,180,156,0.18)" }}
-                    >
-                      <RefreshCw className={`w-3.5 h-3.5 ${regeneratingIdx === sIdx ? "animate-spin" : ""}`} />
-                      {regeneratingIdx === sIdx ? "Regenerating…" : "Regenerate"}
-                    </button>
-                  </div>
-                </div>
-                <p className="italic text-gray-500 mt-1 mb-4 text-sm">{section.instructions}</p>
-
-                <ol className="list-decimal list-inside space-y-6">
-                  {section.questions.map((q, qIdx) => (
-                    <li key={q.id} className="pl-2 group/item">
-                      <div className="inline-block align-top w-[calc(100%-1.5rem)] ml-1">
-
-                        {/* Question row */}
-                        <div className="flex items-start gap-2">
-                          <div className="flex-1">
-                            <EditableText
-                              value={q.text}
-                              onSave={v => updateQuestionText(sIdx, qIdx, v)}
-                              multiline
-                            />
-                          </div>
-                          <button
-                            onClick={() => deleteQuestion(sIdx, qIdx)}
-                            title="Delete question"
-                            className="print:hidden shrink-0 mt-0.5 p-1 rounded opacity-0
-                              group-hover/item:opacity-100 transition-opacity
-                              text-gray-300 hover:text-red-400 hover:bg-red-50"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-
-                        {/* Options */}
-                        {q.options && (
-                          <div className="mt-3 ml-4 grid grid-cols-1 sm:grid-cols-2 gap-2">
-                            {q.options.map((opt, oIdx) => {
-                              // Detect correct option from q.answer (e.g. "B) Some text")
-                              const correctLetter = showAnswers && q.answer
-                                ? q.answer.match(/^([A-D])\)/i)?.[1]?.toUpperCase()
-                                : undefined;
-                              const isCorrect = !!correctLetter &&
-                                correctLetter === String.fromCharCode(65 + oIdx);
-                              return (
-                                <EditableOption
-                                  key={oIdx}
-                                  label={`${String.fromCharCode(97 + oIdx)})`}
-                                  value={opt}
-                                  onSave={v => updateOption(sIdx, qIdx, oIdx, v)}
-                                  isCorrect={isCorrect}
-                                />
-                              );
-                            })}
-                          </div>
-                        )}
-
-                        {/* Answer key field — only shown in answer key mode */}
-                        {showAnswers && (
-                          <div
-                            className="mt-3 ml-4 flex items-start gap-2 px-3 py-2 rounded-lg print:hidden"
-                            style={{ background: "rgba(60,110,90,0.07)", border: "1px solid rgba(60,110,90,0.2)" }}
-                          >
-                            <KeyRound className="w-3.5 h-3.5 text-[#3c6e5a] shrink-0 mt-0.5" />
-                            <div className="flex-1 text-sm">
-                              <span className="text-xs font-semibold text-[#3c6e5a] uppercase tracking-wide mr-2">
-                                Answer:
-                              </span>
-                              <EditableText
-                                value={q.answer ?? ""}
-                                onSave={v => updateAnswer(sIdx, qIdx, v)}
-                                multiline={!q.options}
-                                placeholder="Click pencil to add answer…"
-                                className="text-[#3c6e5a]"
-                              />
-                            </div>
-                          </div>
-                        )}
-
-                        {section.type === "Short Answer" && !showAnswers && (
-                          <div className="mt-6 mb-8 border-b border-dotted border-gray-300 w-full h-8" />
-                        )}
-                      </div>
-                    </li>
-                  ))}
-                </ol>
-
-                <button
-                  onClick={() => addQuestion(sIdx)}
-                  className="print:hidden mt-4 flex items-center gap-1.5 text-xs font-medium
-                    text-[#94B49C] hover:text-[#527D6F] transition-colors"
-                >
-                  <Plus className="w-3.5 h-3.5" /> Add question to {section.name}
+          {/* Mobile styles card */}
+          {showMobileStyles && (
+            <div className="xl:hidden fm-glass rounded-2xl p-5 space-y-5 print:hidden">
+              <div className="flex items-center justify-between border-b border-[rgba(148,180,156,0.1)] pb-2">
+                <span className="text-xs font-bold tracking-widest text-[#94B49C] uppercase">Paper Styles</span>
+                <button onClick={() => setShowMobileStyles(false)} className="text-[#527D6F] hover:text-[#94B49C]">
+                  <X className="w-4 h-4" />
                 </button>
               </div>
-            ))}
+              <CustomizerControls
+                spacing={spacing} setSpacing={setSpacing}
+                fontSize={fontSize} setFontSize={setFontSize}
+                mcqCols={mcqCols} setMcqCols={setMcqCols}
+                showMarks={showMarks} setShowMarks={setShowMarks}
+                showLines={showLines} setShowLines={setShowLines}
+                hideInstructions={hideInstructions} setHideInstructions={setHideInstructions}
+              />
+            </div>
+          )}
+
+          {/* ── Hint banner ── */}
+          <div
+            className="print:hidden flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs text-[#94B49C]"
+            style={{ background: "rgba(82,125,111,0.08)", border: "1px solid rgba(148,180,156,0.15)" }}
+          >
+            {showAnswers ? (
+              <>
+                <KeyRound className="w-3.5 h-3.5 shrink-0 text-[#94B49C]" />
+                {answeredCount > 0
+                  ? <><strong className="mr-0.5">{answeredCount}/{totalQuestions}</strong> answers auto-generated. Click any <strong className="mx-0.5">pencil</strong> to edit. For MCQ, the correct option is highlighted in green.</>
+                  : <>Answer key mode — click the pencil next to each <strong className="mx-0.5">Answer</strong> field to fill in the correct answer.</>
+                }
+                {" "}Use <strong className="mx-0.5">Export PDF → With Answer Key</strong> to download.
+                <span className="ml-2 px-2 py-0.5 rounded text-[11px] font-medium bg-[#94B49C]/20 text-[#3e6358]">
+                  💡 For complex math, use <strong>Print → Save as PDF</strong> instead of Export.
+                </span>
+              </>
+            ) : (
+              <>
+                <Pencil className="w-3.5 h-3.5 shrink-0" />
+                Hover over any question or option and click the <strong className="mx-0.5">pencil icon</strong> to edit.
+                Use <strong className="mx-0.5">+</strong> to add and <strong className="mx-0.5">✕</strong> to delete questions.
+                <span className="ml-2 px-2 py-0.5 rounded text-[11px] font-medium bg-[#94B49C]/20 text-[#3e6358]">
+                  💡 For complex math, use <strong>Print → Save as PDF</strong> instead of Export.
+                </span>
+                {answeredCount > 0 && (
+                  <span className="ml-auto shrink-0 font-medium" style={{ color: "#94B49C" }}>
+                    {answeredCount}/{totalQuestions} answers ready
+                  </span>
+                )}
+              </>
+            )}
+          </div>
+
+          {/* ── The paper ── */}
+          <div
+            className={`rounded-2xl p-6 sm:p-16 md:p-20 border border-gray-200/80 print:shadow-none print:rounded-none print:p-0 shadow-[0_20px_50px_rgba(0,0,0,0.15)] transition-all duration-300 ${paperFontSizeClass}`}
+            style={{ background: "#fff", color: "#1a1a1a", fontFamily: "'Georgia', serif", lineHeight: spacing === "tight" ? "1.4" : spacing === "loose" ? "1.8" : "1.6" }}
+          >
+            {/* Header */}
+            <div className="text-center border-b-2 border-gray-800 pb-6 mb-8">
+              <h1 className={`font-bold uppercase tracking-widest ${h1Class}`}>{paper!.subject}</h1>
+              <h2 className={`mt-2 font-medium text-gray-600 ${h2Class}`}>{paper!.title}</h2>
+              <div className="flex justify-between mt-6 text-xs sm:text-sm font-semibold text-gray-600">
+                <span>Time Allowed: {paper!.duration}</span>
+                <span>Total Marks: {paper!.totalMarks}</span>
+              </div>
+            </div>
+
+            {/* Sections */}
+            <div className={sectionSpacingClass}>
+              {paper!.sections.map((section, sIdx) => {
+                const isSectionDragged = draggedSectionIdx === sIdx;
+                const isSectionDragOver = dragOverSectionIdx === sIdx;
+
+                return (
+                  <div
+                    key={sIdx}
+                    onDragOver={(e) => {
+                      if (draggedSectionIdx !== null) handleSectionDragOver(e, sIdx);
+                    }}
+                    onDrop={(e) => {
+                      if (draggedSectionIdx !== null) handleSectionDrop(e, sIdx);
+                    }}
+                    className={`transition-all duration-200 rounded-xl p-3 -m-3 mb-6
+                      ${isSectionDragged ? "opacity-30 border-2 border-dashed border-gray-300" : ""}
+                      ${isSectionDragOver && !isSectionDragged ? "bg-[rgba(82,125,111,0.05)] border-2 border-dashed border-[#527D6F]" : ""}
+                    `}
+                  >
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
+                      <div className="flex items-center gap-1.5">
+                        <div
+                          draggable="true"
+                          onDragStart={() => handleSectionDragStart(sIdx)}
+                          onDragEnd={handleSectionDragEnd}
+                          className="print:hidden cursor-grab active:cursor-grabbing text-gray-300 hover:text-gray-600 p-0.5"
+                          title="Drag to rearrange section"
+                        >
+                          <GripVertical className="w-4 h-4 shrink-0" />
+                        </div>
+                        <h3 className={`font-bold underline decoration-gray-400 underline-offset-4 ${h3Class}`}>
+                          {section.name}
+                        </h3>
+                      </div>
+                      <div className="flex items-center gap-2 print:hidden w-full sm:w-auto justify-end">
+                        {/* Per-section shuffle */}
+                        <button
+                          onClick={() => shuffleSection(sIdx)}
+                          disabled={regeneratingIdx !== null}
+                          title={`Shuffle questions in ${section.name}`}
+                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold
+                            transition-all
+                            ${regeneratingIdx !== null
+                              ? "text-[#3a5560] cursor-not-allowed opacity-50"
+                              : "text-[#527D6F] hover:text-[#94B49C] hover:bg-[rgba(82,125,111,0.1)]"
+                            }`}
+                          style={{ border: "1px solid rgba(148,180,156,0.18)" }}
+                        >
+                          <Shuffle className="w-3.5 h-3.5" /> Shuffle
+                        </button>
+
+                        {/* Regenerate */}
+                        <button
+                          onClick={() => handleRegenerate(sIdx)}
+                          disabled={regeneratingIdx !== null}
+                          title={`Regenerate ${section.name} questions`}
+                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold
+                            transition-all
+                            ${regeneratingIdx === sIdx
+                              ? "text-[#94B49C] bg-[rgba(82,125,111,0.15)] cursor-wait"
+                              : regeneratingIdx !== null
+                              ? "text-[#3a5560] cursor-not-allowed opacity-50"
+                              : "text-[#527D6F] hover:text-[#94B49C] hover:bg-[rgba(82,125,111,0.1)]"
+                            }`}
+                          style={{ border: "1px solid rgba(148,180,156,0.18)" }}
+                        >
+                          <RefreshCw className={`w-3.5 h-3.5 ${regeneratingIdx === sIdx ? "animate-spin" : ""}`} />
+                          {regeneratingIdx === sIdx ? "Regenerating…" : "Regenerate"}
+                        </button>
+                      </div>
+                    </div>
+                    {!hideInstructions && section.instructions && (
+                      <p className="italic text-gray-500 mt-1 mb-4 text-sm">{section.instructions}</p>
+                    )}
+
+                    <ol className={`list-decimal list-inside ${questionSpacingClass}`}>
+                      {section.questions.map((q, qIdx) => {
+                        const isDragged = draggedItem?.sIdx === sIdx && draggedItem?.qIdx === qIdx;
+                        const isDragOver = dragOverItem?.sIdx === sIdx && dragOverItem?.qIdx === qIdx;
+
+                        return (
+                          <li
+                            key={q.id}
+                            onDragOver={(e) => {
+                              if (draggedItem !== null) handleDragOver(e, sIdx, qIdx);
+                            }}
+                            onDrop={(e) => {
+                              if (draggedItem !== null) handleDrop(e, sIdx, qIdx);
+                            }}
+                            className={`pl-2 group/item relative rounded-lg transition-all duration-200
+                              ${isDragged ? "opacity-30 border-2 border-dashed border-gray-300" : ""}
+                              ${isDragOver && !isDragged ? "bg-[rgba(148,180,156,0.12)] border-2 border-dashed border-[#94B49C]" : ""}
+                            `}
+                          >
+                            <div className="inline-block align-top w-[calc(100%-1.5rem)] ml-1">
+
+                              {/* Question row */}
+                              <div className="flex items-start gap-2 justify-between">
+                                <div className="flex items-start gap-1.5 flex-1 min-w-0">
+                                  <div
+                                    draggable="true"
+                                    onDragStart={() => handleDragStart(sIdx, qIdx)}
+                                    onDragEnd={handleDragEnd}
+                                    className="print:hidden cursor-grab active:cursor-grabbing text-gray-300 hover:text-gray-600 mt-1"
+                                    title="Drag to rearrange question"
+                                  >
+                                    <GripVertical className="w-3.5 h-3.5 shrink-0" />
+                                  </div>
+                                  <div className="flex-1 min-w-0">
+                                    <EditableText
+                                      value={q.text}
+                                      onSave={v => updateQuestionText(sIdx, qIdx, v)}
+                                      multiline
+                                    />
+                                  </div>
+                                </div>
+                                
+                                <div className="flex items-center gap-2 shrink-0 print:gap-0">
+                                  {showMarks && (
+                                    <span className="text-xs sm:text-sm font-semibold text-gray-500 select-none whitespace-nowrap">
+                                      [{q.marks ?? 1}]
+                                    </span>
+                                  )}
+                                  
+                                  <button
+                                    onClick={() => deleteQuestion(sIdx, qIdx)}
+                                    title="Delete question"
+                                    className="print:hidden shrink-0 p-1 rounded lg:opacity-0
+                                      group-hover/item:lg:opacity-100 group-hover/item:opacity-100 transition-opacity
+                                      text-gray-300 hover:text-red-400 hover:bg-red-50"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              </div>
+
+                              {/* Options */}
+                              {q.options && (
+                                <div className={`mt-3 ml-4 grid ${mcqColsClass} gap-2`}>
+                                  {q.options.map((opt, oIdx) => {
+                                    // Detect correct option from q.answer (e.g. "B) Some text")
+                                    const correctLetter = showAnswers && q.answer
+                                      ? q.answer.match(/^([A-D])\)/i)?.[1]?.toUpperCase()
+                                      : undefined;
+                                    const isCorrect = !!correctLetter &&
+                                      correctLetter === String.fromCharCode(65 + oIdx);
+                                    return (
+                                      <EditableOption
+                                        key={oIdx}
+                                        label={`${String.fromCharCode(97 + oIdx)})`}
+                                        value={opt}
+                                        onSave={v => updateOption(sIdx, qIdx, oIdx, v)}
+                                        isCorrect={isCorrect}
+                                      />
+                                    );
+                                  })}
+                                </div>
+                              )}
+
+                              {/* Answer key field — only shown in answer key mode */}
+                              {showAnswers && (
+                                <div
+                                  className="mt-3 ml-4 flex items-start gap-2 px-3 py-2 rounded-lg print:hidden"
+                                  style={{ background: "rgba(60,110,90,0.07)", border: "1px solid rgba(60,110,90,0.2)" }}
+                                >
+                                  <KeyRound className="w-3.5 h-3.5 text-[#3c6e5a] shrink-0 mt-0.5" />
+                                  <div className="flex-1 text-sm">
+                                    <span className="text-xs font-semibold text-[#3c6e5a] uppercase tracking-wide mr-2">
+                                      Answer:
+                                    </span>
+                                    <EditableText
+                                      value={q.answer ?? ""}
+                                      onSave={v => updateAnswer(sIdx, qIdx, v)}
+                                      multiline={!q.options}
+                                      placeholder="Click pencil to add answer…"
+                                      className="text-[#3c6e5a]"
+                                    />
+                                  </div>
+                                </div>
+                              )}
+
+                              {section.type.toLowerCase().includes("short answer") && !showAnswers && showLines && (
+                                <div className="mt-6 mb-8 border-b border-dotted border-gray-300 w-full h-8" />
+                              )}
+                            </div>
+                          </li>
+                        );
+                      })}
+                    </ol>
+
+                    <button
+                      onClick={() => addQuestion(sIdx)}
+                      className="print:hidden mt-4 flex items-center gap-1.5 text-xs font-medium
+                        text-[#94B49C] hover:text-[#527D6F] transition-colors"
+                    >
+                      <Plus className="w-3.5 h-3.5" /> Add question to {section.name}
+                    </button>
+                  </div>
+                );
+              })}
           </div>
 
           {/* Footer */}
@@ -731,7 +957,198 @@ export function ViewPaper() {
             *** End of Paper ***
           </div>
         </div>
+      </div>
 
+      {/* Right side: Desktop Sticky Styles panel */}
+        <div className="hidden xl:block w-80 shrink-0 print:hidden">
+          <div className="sticky top-6 fm-glass p-5 space-y-6">
+            <div className="border-b border-[rgba(148,180,156,0.15)] pb-3">
+              <h3 className="text-sm font-bold tracking-widest text-[#94B49C] uppercase flex items-center gap-2">
+                <Settings className="w-4 h-4" /> Paper Layout Styles
+              </h3>
+            </div>
+            
+            <CustomizerControls
+              spacing={spacing}
+              setSpacing={setSpacing}
+              fontSize={fontSize}
+              setFontSize={setFontSize}
+              mcqCols={mcqCols}
+              setMcqCols={setMcqCols}
+              showMarks={showMarks}
+              setShowMarks={setShowMarks}
+              showLines={showLines}
+              setShowLines={setShowLines}
+              hideInstructions={hideInstructions}
+              setHideInstructions={setHideInstructions}
+            />
+          </div>
+        </div>
+
+      </div>
+    </div>
+  );
+}
+
+// ── Switch subcomponent ──
+function Switch({
+  checked,
+  onChange,
+  label,
+  description,
+}: {
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  label: string;
+  description?: string;
+}) {
+  return (
+    <div className="flex items-center justify-between py-1.5">
+      <div className="flex flex-col pr-2">
+        <span className="text-xs font-semibold text-[#D5E2D6]">{label}</span>
+        {description && <span className="text-[10px] text-gray-400 leading-tight mt-0.5">{description}</span>}
+      </div>
+      <button
+        type="button"
+        onClick={() => onChange(!checked)}
+        className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+          checked ? "bg-[#527D6F]" : "bg-[rgba(255,255,255,0.08)]"
+        }`}
+      >
+        <span
+          className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+            checked ? "translate-x-4" : "translate-x-0"
+          }`}
+        />
+      </button>
+    </div>
+  );
+}
+
+// ── CustomizerControls subcomponent ──
+function CustomizerControls({
+  spacing,
+  setSpacing,
+  fontSize,
+  setFontSize,
+  mcqCols,
+  setMcqCols,
+  showMarks,
+  setShowMarks,
+  showLines,
+  setShowLines,
+  hideInstructions,
+  setHideInstructions,
+}: {
+  spacing: "tight" | "normal" | "loose";
+  setSpacing: (v: "tight" | "normal" | "loose") => void;
+  fontSize: "sm" | "base" | "lg";
+  setFontSize: (v: "sm" | "base" | "lg") => void;
+  mcqCols: number;
+  setMcqCols: (v: number) => void;
+  showMarks: boolean;
+  setShowMarks: (v: boolean) => void;
+  showLines: boolean;
+  setShowLines: (v: boolean) => void;
+  hideInstructions: boolean;
+  setHideInstructions: (v: boolean) => void;
+}) {
+  return (
+    <div className="space-y-5">
+      {/* Font Size Preset */}
+      <div className="space-y-2">
+        <div className="flex items-center gap-1.5 text-xs font-semibold text-[#94B49C] uppercase tracking-wider">
+          <Type className="w-3.5 h-3.5" />
+          <span>Font Size</span>
+        </div>
+        <div className="grid grid-cols-3 gap-1 p-1 bg-[rgba(255,255,255,0.04)] border border-[rgba(148,180,156,0.15)] rounded-lg">
+          {(["sm", "base", "lg"] as const).map(sz => (
+            <button
+              key={sz}
+              onClick={() => setFontSize(sz)}
+              className={`py-1 text-xs font-medium rounded transition-all capitalize cursor-pointer ${
+                fontSize === sz
+                  ? "bg-[#527D6F] text-white shadow-sm"
+                  : "text-[#94B49C] hover:text-[#D5E2D6] hover:bg-[rgba(82,125,111,0.08)]"
+              }`}
+            >
+              {sz === "base" ? "Normal" : sz === "sm" ? "Small" : "Large"}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Line Spacing Preset */}
+      <div className="space-y-2">
+        <div className="flex items-center gap-1.5 text-xs font-semibold text-[#94B49C] uppercase tracking-wider">
+          <AlignJustify className="w-3.5 h-3.5" />
+          <span>Line Spacing</span>
+        </div>
+        <div className="grid grid-cols-3 gap-1 p-1 bg-[rgba(255,255,255,0.04)] border border-[rgba(148,180,156,0.15)] rounded-lg">
+          {(["tight", "normal", "loose"] as const).map(sp => (
+            <button
+              key={sp}
+              onClick={() => setSpacing(sp)}
+              className={`py-1 text-xs font-medium rounded transition-all capitalize cursor-pointer ${
+                spacing === sp
+                  ? "bg-[#527D6F] text-white shadow-sm"
+                  : "text-[#94B49C] hover:text-[#D5E2D6] hover:bg-[rgba(82,125,111,0.08)]"
+              }`}
+            >
+              {sp}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* MCQ Columns */}
+      <div className="space-y-2">
+        <div className="flex items-center gap-1.5 text-xs font-semibold text-[#94B49C] uppercase tracking-wider">
+          <LayoutGrid className="w-3.5 h-3.5" />
+          <span>MCQ Layout Columns</span>
+        </div>
+        <div className="grid grid-cols-3 gap-1 p-1 bg-[rgba(255,255,255,0.04)] border border-[rgba(148,180,156,0.15)] rounded-lg">
+          {([1, 2, 4] as const).map(cols => (
+            <button
+              key={cols}
+              onClick={() => setMcqCols(cols)}
+              className={`py-1 text-xs font-medium rounded transition-all cursor-pointer ${
+                mcqCols === cols
+                  ? "bg-[#527D6F] text-white shadow-sm"
+                  : "text-[#94B49C] hover:text-[#D5E2D6] hover:bg-[rgba(82,125,111,0.08)]"
+              }`}
+            >
+              {cols} {cols === 1 ? "Col" : "Cols"}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Visual Toggles Divider */}
+      <div className="border-t border-[rgba(148,180,156,0.15)] pt-4 space-y-3">
+        <div className="text-xs font-semibold text-[#94B49C] uppercase tracking-wider mb-1">
+          Document Elements
+        </div>
+        <div className="space-y-2">
+          <Switch
+            checked={showMarks}
+            onChange={setShowMarks}
+            label="Question Marks Badges"
+            description="Display marks per question (e.g. [2])"
+          />
+          <Switch
+            checked={showLines}
+            onChange={setShowLines}
+            label="Short Answer Lines"
+            description="Draw dotted lines for written answers"
+          />
+          <Switch
+            checked={!hideInstructions}
+            onChange={(checked) => setHideInstructions(!checked)}
+            label="Section Instructions"
+            description="Show instructions under section names"
+          />
+        </div>
       </div>
     </div>
   );

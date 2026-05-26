@@ -183,13 +183,13 @@ export function SourceMaterialPage() {
   });
 
   return (
-    <div className="max-w-5xl mx-auto px-6 py-10 fm-fadein">
+    <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8 sm:py-10 fm-fadein">
 
       {/* ── Header ── */}
-      <div className="flex items-end justify-between mb-8">
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-8 sm:mb-10">
         <div>
           <p className="text-xs font-semibold tracking-widest text-[#527D6F] uppercase mb-1">Library</p>
-          <h1 className="text-3xl font-bold text-[#D5E2D6]"
+          <h1 className="text-2xl sm:text-3xl font-bold text-[#D5E2D6]"
             style={{ fontFamily: "'Playfair Display', serif" }}>
             Source Material
           </h1>
@@ -198,9 +198,9 @@ export function SourceMaterialPage() {
           </p>
         </div>
         {/* Storage usage pill */}
-        <div className="flex items-center gap-2 px-3 py-1.5 rounded-full text-xs text-[#527D6F]"
+        <div className="flex items-center gap-2 px-3 py-1.5 rounded-full text-xs text-[#527D6F] self-start sm:self-auto"
           style={{ border: "1px solid rgba(148,180,156,0.15)", background: "rgba(82,125,111,0.06)" }}>
-          <HardDrive className="w-3.5 h-3.5" />
+          <HardDrive className="w-3.5 h-3.5 shrink-0" />
           {stats.estimatedKB > 1024
             ? `${(stats.estimatedKB / 1024).toFixed(1)} MB used`
             : `${stats.estimatedKB} KB used`}
@@ -208,7 +208,7 @@ export function SourceMaterialPage() {
       </div>
 
       {/* ── Stats strip ── */}
-      <div className="grid grid-cols-3 gap-4 mb-8">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6 sm:mb-8">
         {[
           { label: "Sources",        value: sources.length },
           { label: "Pages stored",   value: sources.reduce((a, s) => a + s.pageCount, 0) || "—" },
@@ -283,94 +283,97 @@ export function SourceMaterialPage() {
                   className={`group transition-colors ${isPending ? "" : "hover:bg-[rgba(82,125,111,0.07)]"}`}
                   style={isPending ? { background: "rgba(192,80,74,0.04)" } : {}}
                 >
-                  <div className="px-6 py-4 flex items-start gap-4">
+                  <div className="px-4 sm:px-6 py-4 flex flex-col md:flex-row md:items-start gap-4">
 
-                    {/* Icon */}
-                    <div className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0 mt-0.5"
-                      style={{ background: isPending ? "rgba(192,80,74,0.12)" : "rgba(82,125,111,0.18)" }}>
-                      <FileText className={`w-5 h-5 ${isPending ? "text-[#c0504a]" : "text-[#94B49C]"}`} />
-                    </div>
-
-                    {/* Content */}
-                    <div className="flex-1 min-w-0 space-y-1">
-
-                      {/* Title (editable) */}
-                      <div className="text-sm font-semibold">
-                        <InlineEdit
-                          value={src.title}
-                          placeholder="Untitled"
-                          onSave={v => { sourceService.updateSource(src.id, { title: v }); load(); }}
-                        />
+                    {/* Left block containing icon + details */}
+                    <div className="flex items-start gap-4 flex-1 min-w-0">
+                      {/* Icon */}
+                      <div className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0 mt-0.5"
+                        style={{ background: isPending ? "rgba(192,80,74,0.12)" : "rgba(82,125,111,0.18)" }}>
+                        <FileText className={`w-5 h-5 ${isPending ? "text-[#c0504a]" : "text-[#94B49C]"}`} />
                       </div>
 
-                      {/* Subject (editable) */}
-                      <div className="text-xs">
-                        <span className="text-[#3a5560] mr-1">Subject:</span>
-                        <InlineEdit
-                          value={src.subject}
-                          placeholder="Add subject…"
-                          onSave={v => { sourceService.updateSource(src.id, { subject: v }); load(); }}
-                        />
-                      </div>
+                      {/* Content */}
+                      <div className="flex-1 min-w-0 space-y-1">
 
-                      {/* Meta row */}
-                      <div className="flex flex-wrap gap-3 text-xs text-[#527D6F] pt-0.5">
-                        <span className="flex items-center gap-1">
-                          <Calendar className="w-3 h-3" />
-                          {new Date(src.addedAt).toLocaleDateString()}
-                        </span>
-                        <span className="flex items-center gap-1">
-                          <Hash className="w-3 h-3" />
-                          {src.pageCount > 0 ? `${src.pageCount} pages` : "pages unknown"}
-                        </span>
-                        <span className="flex items-center gap-1">
-                          <HardDrive className="w-3 h-3" />
-                          {fmtSize(src.sizeBytes)}
-                        </span>
-                        {src.chapters && src.chapters.length > 0 && (
-                          <span className="flex items-center gap-1 text-[#94B49C] font-medium">
-                            <ListTree className="w-3 h-3" />
-                            {src.chapters.length} chapters
-                          </span>
-                        )}
-                        {srcPapers.length > 0 && (
-                          <span className="flex items-center gap-1 text-[#94B49C] font-medium">
-                            <Wand2 className="w-3 h-3" />
-                            {srcPapers.length} paper{srcPapers.length !== 1 ? "s" : ""} generated
-                          </span>
-                        )}
-                      </div>
-
-                      {/* Papers generated from this source */}
-                      {srcPapers.length > 0 && (
-                        <div className="flex flex-wrap gap-1.5 pt-1">
-                          {srcPapers.map(p => (
-                            <button key={p.id}
-                              onClick={() => navigate(`/paper/${p.id}`)}
-                              className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px]
-                                font-medium text-[#527D6F] hover:text-[#94B49C] transition-all"
-                              style={{ border: "1px solid rgba(148,180,156,0.18)", background: "rgba(82,125,111,0.08)" }}>
-                              <FileText className="w-2.5 h-2.5" />
-                              {p.title}
-                              <ChevronRight className="w-2.5 h-2.5" />
-                            </button>
-                          ))}
+                        {/* Title (editable) */}
+                        <div className="text-sm font-semibold">
+                          <InlineEdit
+                            value={src.title}
+                            placeholder="Untitled"
+                            onSave={v => { sourceService.updateSource(src.id, { title: v }); load(); }}
+                          />
                         </div>
-                      )}
+
+                        {/* Subject (editable) */}
+                        <div className="text-xs">
+                          <span className="text-[#3a5560] mr-1">Subject:</span>
+                          <InlineEdit
+                            value={src.subject}
+                            placeholder="Add subject…"
+                            onSave={v => { sourceService.updateSource(src.id, { subject: v }); load(); }}
+                          />
+                        </div>
+
+                        {/* Meta row */}
+                        <div className="flex flex-wrap gap-3 text-xs text-[#527D6F] pt-0.5">
+                          <span className="flex items-center gap-1">
+                            <Calendar className="w-3 h-3 shrink-0" />
+                            {new Date(src.addedAt).toLocaleDateString()}
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <Hash className="w-3 h-3 shrink-0" />
+                            {src.pageCount > 0 ? `${src.pageCount} pages` : "pages unknown"}
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <HardDrive className="w-3 h-3 shrink-0" />
+                            {fmtSize(src.sizeBytes)}
+                          </span>
+                          {src.chapters && src.chapters.length > 0 && (
+                            <span className="flex items-center gap-1 text-[#94B49C] font-medium shrink-0">
+                              <ListTree className="w-3 h-3 shrink-0" />
+                              {src.chapters.length} chapters
+                            </span>
+                          )}
+                          {srcPapers.length > 0 && (
+                            <span className="flex items-center gap-1 text-[#94B49C] font-medium shrink-0">
+                              <Wand2 className="w-3 h-3 shrink-0" />
+                              {srcPapers.length} paper{srcPapers.length !== 1 ? "s" : ""} generated
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Papers generated from this source */}
+                        {srcPapers.length > 0 && (
+                          <div className="flex flex-wrap gap-1.5 pt-1.5">
+                            {srcPapers.map(p => (
+                              <button key={p.id}
+                                onClick={() => navigate(`/paper/${p.id}`)}
+                                className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px]
+                                  font-medium text-[#527D6F] hover:text-[#94B49C] transition-all"
+                                style={{ border: "1px solid rgba(148,180,156,0.18)", background: "rgba(82,125,111,0.08)" }}>
+                                <FileText className="w-2.5 h-2.5 shrink-0" />
+                                <span className="truncate max-w-[120px]">{p.title}</span>
+                                <ChevronRight className="w-2.5 h-2.5 shrink-0" />
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     </div>
 
                     {/* Actions */}
-                    <div className="flex items-center gap-2 shrink-0 mt-0.5">
+                    <div className="flex items-center justify-between md:justify-end gap-2 shrink-0 mt-1 md:mt-0.5 md:ml-auto w-full md:w-auto border-t md:border-t-0 border-[rgba(148,180,156,0.08)] pt-2.5 md:pt-0">
                       {/* Generate paper button */}
                       <button
                         onClick={() => handleGenerate(src)}
                         title="Generate a paper from this source"
                         className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold
                           text-[#94B49C] hover:text-[#D5E2D6] hover:bg-[rgba(82,125,111,0.15)]
-                          transition-all opacity-0 group-hover:opacity-100"
+                          transition-all lg:opacity-0 group-hover:lg:opacity-100 opacity-100"
                         style={{ border: "1px solid rgba(148,180,156,0.2)" }}
                       >
-                        <Wand2 className="w-3.5 h-3.5" /> Generate
+                        <Wand2 className="w-3.5 h-3.5 shrink-0" /> Generate
                       </button>
 
                       {/* Delete */}
@@ -380,9 +383,9 @@ export function SourceMaterialPage() {
                         className={`p-2 rounded-lg transition-all
                           ${isPending
                             ? "text-[#c0504a] bg-[rgba(192,80,74,0.12)] opacity-100"
-                            : "text-[#527D6F] hover:text-[#c0504a] hover:bg-[rgba(192,80,74,0.1)] opacity-0 group-hover:opacity-100"}`}
+                            : "text-[#527D6F] hover:text-[#c0504a] hover:bg-[rgba(192,80,74,0.1)] lg:opacity-0 group-hover:lg:opacity-100 opacity-100"}`}
                       >
-                        <Trash2 className="w-4 h-4" />
+                        <Trash2 className="w-4 h-4 shrink-0" />
                       </button>
                     </div>
                   </div>

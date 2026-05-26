@@ -63,11 +63,20 @@ export function getLMStudioConfig(): LMStudioConfig {
         }
       }
 
+      // Clamp values to safe runtime ranges to prevent browser/hardware freezes
+      const rawMaxTokens = parsed.maxTokens ?? 1024;
+      const rawContextChars = parsed.contextChars ?? 3000;
+      
+      const clampedMaxTokens = Math.max(256, Math.min(8192, rawMaxTokens));
+      const clampedContextChars = Math.max(1000, Math.min(32000, rawContextChars));
+
       return {
-        maxTokens:    parsed.maxTokens    ?? 2048,
-        contextChars: parsed.contextChars ?? 6000,
-        apiUrl:       parsed.apiUrl       ?? defaultUrl,
-        ...parsed,
+        enabled:      parsed.enabled ?? false,
+        apiUrl:       parsed.apiUrl  ?? defaultUrl,
+        model:        parsed.model   ?? 'local-model',
+        apiToken:     parsed.apiToken ?? '',
+        maxTokens:    clampedMaxTokens,
+        contextChars: clampedContextChars,
       };
     } catch { /* fall through */ }
   }
@@ -76,13 +85,18 @@ export function getLMStudioConfig(): LMStudioConfig {
     apiUrl:       defaultUrl,
     model:        'local-model',
     apiToken:     '',
-    maxTokens:    2048,
-    contextChars: 6000,
+    maxTokens:    1024,
+    contextChars: 3000,
   };
 }
 
 export function saveLMStudioConfig(config: LMStudioConfig): void {
-  localStorage.setItem('lmStudioConfig', JSON.stringify(config));
+  const clamped = {
+    ...config,
+    maxTokens: Math.max(256, Math.min(8192, config.maxTokens)),
+    contextChars: Math.max(1000, Math.min(32000, config.contextChars)),
+  };
+  localStorage.setItem('lmStudioConfig', JSON.stringify(clamped));
 }
 
 // ── Fetch the list of loaded models from LM Studio ──
@@ -184,7 +198,8 @@ function buildPrompt(
   subject:      string,
   subjectType:  SubjectType = 'general',
   stemProblems: string[]    = [],
-  academicLevel: string     = "High School"
+  academicLevel: string     = "High School",
+  isPromptMode?: boolean
 ): string {
   const { count, type, difficulty, marks } = section;
   const bloom     = BLOOMS_PROMPT[difficulty] ?? BLOOMS_PROMPT.Medium;
@@ -193,7 +208,7 @@ function buildPrompt(
 
   // ── Symbol handling guidance for STEM ────────────────────────────────
   // pdfjs often corrupts or drops math symbols. Instruct the LLM to handle gracefully.
-  const symbolGuidance = subjectType !== 'general' ? `
+  const symbolGuidance = (subjectType !== 'general' && !isPromptMode) ? `
 SYMBOL / FORMULA HANDLING:
 - The source text was extracted from a PDF and may contain garbled or missing mathematical symbols.
 - If a formula or equation appears corrupted (e.g. "âˆ«" instead of "∫", "x ² " with extra spaces), infer the intended expression from context and write it correctly in your question.
@@ -221,6 +236,36 @@ SYMBOL / FORMULA HANDLING:
   } else {
     format  = 'Numbered list. Each item: question, then "Answer:" with a concise model answer.';
     example = `1. Explain X.\nAnswer: X refers to...\n\n2. Describe Y.\nAnswer: Y is characterised by...`;
+  }
+
+  if (isPromptMode) {
+    return `You are an expert ${subject} test-setter creating an exam for a ${academicLevel} class.
+Your task is to generate EXACTLY ${count} "${type}" questions based on the following topic description and exam instructions.
+
+CRITICAL REQUIREMENTS:
+1. Target Audience: These questions MUST be strictly calibrated for a ${academicLevel} level. Do not generate overly basic or overly advanced questions for this level.
+2. Difficulty: ${difficulty}. ${bloom.level} — ${bloom.description}. Preferred question verbs: ${bloom.exampleVerbs}.
+3. Marks: Each question is worth ${marks} marks.
+4. Topic & Guidelines: Generate questions according to the user topic guide below:
+"""
+${pdfSample}
+"""
+${stemBlock}
+5. FORMATTING: You MUST follow the exact format below. Do not add conversational text, introductions, or conclusions.
+
+OUTPUT FORMAT — follow this exactly:
+${format}
+
+EXAMPLE:
+${example}
+
+RULES:
+- Write exactly ${count} questions. No more, no less.
+- Match the cognitive level: ${bloom.level}. Use the preferred verbs listed above.
+- Include an "Answer:" line for EVERY question exactly as shown in the format above.
+- For MCQ: the Answer line must be just the letter (e.g., "Answer: B"). Do not repeat the option text.
+- Do NOT add section headers, preamble, or closing remarks.
+- Start immediately with "1."`;
   }
 
   // ── Inject sample problems extracted from the PDF (STEM boost) ──────
@@ -492,13 +537,14 @@ export async function generateQuestionsWithLLM(
   subject:      string,
   subjectType:  SubjectType = 'general',
   stemProblems: string[]    = [],
-  academicLevel: string     = "High School"
+  academicLevel: string     = "High School",
+  isPromptMode?: boolean
 ): Promise<Question[]> {
   const config = getLMStudioConfig();
   if (!config.enabled) throw new Error('LM Studio is not enabled');
   if (!config.model)   throw new Error('No model selected. Please pick a model in LM Studio Settings.');
 
-  console.log(`[LLM] Section "${section.name}" — ${section.count}× ${section.type} [${subjectType}] stemProblems=${stemProblems.length}`);
+  console.log(`[LLM] Section "${section.name}" — ${section.count}× ${section.type} [${subjectType}] stemProblems=${stemProblems.length} isPromptMode=${isPromptMode}`);
   
   const totalQuestions = section.count;
   const totalBatches = Math.ceil(totalQuestions / MAX_Q_PER_BATCH);
@@ -511,11 +557,13 @@ export async function generateQuestionsWithLLM(
     let raw = '';
     const t0 = performance.now();
     try {
-      const sample = samplePdfText(pdfText, config.contextChars, subjectType, batchIdx, totalBatches);
-      const prompt = buildPrompt(sample, batchSection, subject, subjectType, stemProblems, academicLevel);
+      const sample = isPromptMode
+        ? pdfText
+        : samplePdfText(pdfText, config.contextChars, subjectType, batchIdx, totalBatches);
+      const prompt = buildPrompt(sample, batchSection, subject, subjectType, stemProblems, academicLevel, isPromptMode);
       raw = await callLLM(prompt, config);
     } catch (err: any) {
-      if (err.message && err.message.includes('Context Length Exceeded')) {
+      if (err.message && err.message.includes('Context Length Exceeded') && !isPromptMode) {
         console.warn(`[LLM] Context length exceeded on batch ${batchIdx + 1}! Retrying with 50% reduced context and 1024 max tokens...`);
         const fallbackConfig = { ...config, contextChars: Math.floor(config.contextChars / 2), maxTokens: 1024 };
         const fallbackSample = samplePdfText(pdfText, fallbackConfig.contextChars, subjectType, batchIdx, totalBatches);

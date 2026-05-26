@@ -42,6 +42,8 @@ export interface Paper {
   subjectType?: SubjectType;
   /** Extracted PDF text — stored so sections can be regenerated without re-uploading */
   sourceText?: string;
+  /** Whether the paper was generated from a custom prompt/topic rather than a PDF */
+  isPromptMode?: boolean;
 }
 
 function isSkippablePage(text: string): boolean {
@@ -427,15 +429,25 @@ function analyzeContent(pdfText: string, subjectType: SubjectType = 'general'): 
 export async function generateQuestions(
   pdfText: string, sections: Section[], paperTitle: string,
   subject: string, duration: string, fileName: string,
-  academicLevel: string = "High School"
+  academicLevel: string = "High School",
+  isPromptMode: boolean = false
 ): Promise<Paper> {
   const t0          = performance.now();
   const useLLM      = getLMStudioConfig().enabled;
-  const subjectType = classifySubject(subject, pdfText.slice(0, 5_000));
-  // For STEM subjects, clean garbled symbols before analysis and LLM
-  const cleanedText = subjectType !== 'general' ? cleanStemText(pdfText) : pdfText;
-  const analysis    = analyzeContent(cleanedText, subjectType);
-  const { keywords, topics, definitions, facts, concepts, sentences, stemProblems } = analysis;
+  const subjectType = classifySubject(subject, isPromptMode ? "" : pdfText.slice(0, 5_000));
+  
+  // For STEM subjects, clean garbled symbols before analysis and LLM (skip in prompt mode)
+  const cleanedText = (subjectType !== 'general' && !isPromptMode) ? cleanStemText(pdfText) : pdfText;
+  
+  // Skip full analysis in prompt mode
+  const analysis    = !isPromptMode ? analyzeContent(cleanedText, subjectType) : null;
+  const keywords    = analysis?.keywords ?? [];
+  const topics      = analysis?.topics ?? [];
+  const definitions = analysis?.definitions ?? [];
+  const facts       = analysis?.facts ?? [];
+  const concepts    = analysis?.concepts ?? [];
+  const sentences   = analysis?.sentences ?? [];
+  const stemProblems = analysis?.stemProblems ?? [];
 
   let finalSections: PaperSection[] = [];
 
@@ -443,11 +455,17 @@ export async function generateQuestions(
     const section = sections[sIdx];
     let questions: Question[];
 
+    if (isPromptMode && !useLLM) {
+      throw new Error(
+        "Local AI (LM Studio) must be enabled in Settings to generate a paper from custom prompts."
+      );
+    }
+
     if (useLLM) {
       try {
         questions = await generateQuestionsWithLLM(
           cleanedText, section, sIdx, subject, subjectType,
-          stemProblems, academicLevel
+          stemProblems, academicLevel, isPromptMode
         );
       } catch (err) {
         // DO NOT silently fall back — surface the real error so the user knows LM Studio failed
@@ -477,6 +495,7 @@ export async function generateQuestions(
     academicLevel,
     subjectType,
     sourceText: cleanedText,
+    isPromptMode,
   };
 }
 
@@ -1195,6 +1214,7 @@ export async function regenerateSection(
   const sec     = paper.sections[sectionIdx];
   const useLLM  = getLMStudioConfig().enabled;
   const text    = paper.sourceText ?? '';
+  const isPromptMode = paper.isPromptMode || paper.sourceFile === 'Custom Prompt';
 
   // Build a Section descriptor from the stored PaperSection
   const sectionDef: Section = {
@@ -1208,8 +1228,17 @@ export async function regenerateSection(
   let questions: Question[];
 
   if (useLLM && text) {
-    questions = await generateQuestionsWithLLM(text, sectionDef, sectionIdx, paper.subject);
+    questions = await generateQuestionsWithLLM(
+      text, sectionDef, sectionIdx, paper.subject,
+      paper.subjectType ?? 'general', [], paper.academicLevel ?? 'High School',
+      isPromptMode
+    );
   } else if (text) {
+    if (isPromptMode) {
+      throw new Error(
+        "Local AI (LM Studio) must be enabled in Settings to regenerate questions for a prompt-based paper."
+      );
+    }
     // Template fallback when LLM is off but text is available
     const analysis = analyzeContent(text);
     const { keywords, topics, definitions, facts, concepts, sentences } = analysis;

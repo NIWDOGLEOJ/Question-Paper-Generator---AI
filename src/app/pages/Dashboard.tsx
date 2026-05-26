@@ -202,15 +202,15 @@ export function Dashboard() {
   }
 
   return (
-    <div className="max-w-5xl mx-auto px-6 py-10 fm-fadein">
+    <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8 sm:py-10 fm-fadein">
 
       {/* ── Header row ── */}
-      <div className="flex items-end justify-between mb-10">
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-8 sm:mb-10">
         <div>
           <p className="text-xs font-semibold tracking-widest text-[#527D6F] uppercase mb-1">
             Your workspace
           </p>
-          <h1 className="text-3xl font-bold text-[#D5E2D6]"
+          <h1 className="text-2xl sm:text-3xl font-bold text-[#D5E2D6]"
             style={{ fontFamily: "'Playfair Display', serif" }}>
             Question Papers
           </h1>
@@ -220,14 +220,14 @@ export function Dashboard() {
         </div>
         <Link
           to="/new"
-          className="fm-btn-primary flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold shadow-lg"
+          className="fm-btn-primary flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold shadow-lg shrink-0 self-start sm:self-auto"
         >
           <Plus className="w-4 h-4" /> New Paper
         </Link>
       </div>
 
       {/* ── Stats strip ── */}
-      <div className="grid grid-cols-3 gap-4 mb-8">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6 sm:mb-8">
         {[
           { label: "Total Papers",   value: papers.length },
           { label: "Total Sections", value: papers.reduce((a, p) => a + p.sections.length, 0) },
@@ -373,107 +373,112 @@ export function Dashboard() {
                   }}
                 >
                   {/* ── Main row ── */}
-                  <div className="px-6 py-4 flex items-start gap-4">
+                  <div className="px-4 sm:px-6 py-4 flex flex-col sm:flex-row sm:items-start gap-4">
 
-                    {/* Icon */}
-                    <div
-                      className="w-10 h-10 rounded-lg flex items-center justify-center shrink-0 transition-colors mt-0.5"
-                      style={{ background: isPending ? 'rgba(192,80,74,0.12)' : 'rgba(82,125,111,0.18)' }}
-                    >
-                      <FileText className={`w-5 h-5 ${isPending ? 'text-[#c0504a]' : 'text-[#94B49C]'}`} />
-                    </div>
-
-                    {/* Content */}
-                    <div className="flex-1 min-w-0">
-                      {isPending ? (
-                        <p className="text-sm font-semibold text-[#c0504a] truncate">{paper.title}</p>
-                      ) : (
-                        <Link to={`/paper/${paper.id}`}
-                          className="text-sm font-semibold text-[#D5E2D6] truncate block
-                            group-hover:text-[#94B49C] transition-colors">
-                          {paper.title}
-                        </Link>
-                      )}
-
-                      {/* Metadata row */}
-                      <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-[#527D6F]">
-                        <span className="flex items-center gap-1">
-                          <BookOpen className="h-3 w-3" /> {paper.subject}
-                        </span>
-                        <span className="flex items-center gap-1">
-                          <Calendar className="h-3 w-3" />
-                          {new Date(paper.createdAt).toLocaleDateString()}
-                        </span>
-                        <span className="flex items-center gap-1">
-                          <Clock className="h-3 w-3" /> {paper.duration}
-                        </span>
-                        <span className="text-[#94B49C] font-medium">{paper.totalMarks} marks</span>
+                    {/* Left block containing icon + text contents */}
+                    <div className="flex items-start gap-4 flex-1 min-w-0">
+                      {/* Icon */}
+                      <div
+                        className="w-10 h-10 rounded-lg flex items-center justify-center shrink-0 transition-colors mt-0.5"
+                        style={{ background: isPending ? 'rgba(192,80,74,0.12)' : 'rgba(82,125,111,0.18)' }}
+                      >
+                        <FileText className={`w-5 h-5 ${isPending ? 'text-[#c0504a]' : 'text-[#94B49C]'}`} />
                       </div>
 
-                      {/* Tag chips */}
-                      {hasTags && (
-                        <div className="mt-2 flex flex-wrap gap-1.5">
-                          {paper.tags!.map(t => (
-                            <button
-                              key={t}
-                              onClick={() => setActiveTagFilter(
-                                activeTagFilter === t ? null : t
-                              )}
-                              title={activeTagFilter === t ? "Clear filter" : `Filter by "${t}"`}
-                              className={`flex items-center gap-1 px-2 py-0.5 rounded-full
-                                text-[10px] font-medium transition-all ${
-                                  activeTagFilter === t
-                                    ? "text-[#D5E2D6]"
-                                    : "text-[#527D6F] hover:text-[#94B49C]"
-                                }`}
-                              style={{
-                                background: activeTagFilter === t
-                                  ? "rgba(82,125,111,0.35)"
-                                  : "rgba(82,125,111,0.12)",
-                                border: "1px solid rgba(148,180,156,0.15)",
-                              }}
-                            >
-                              <Tag className="w-2.5 h-2.5" />
-                              {t}
-                            </button>
-                          ))}
+                      {/* Content */}
+                      <div className="flex-1 min-w-0">
+                        {isPending ? (
+                          <p className="text-sm font-semibold text-[#c0504a] truncate">{paper.title}</p>
+                        ) : (
+                          <Link to={`/paper/${paper.id}`}
+                            className="text-sm font-semibold text-[#D5E2D6] truncate block
+                              group-hover:text-[#94B49C] transition-colors">
+                            {paper.title}
+                          </Link>
+                        )}
+
+                        {/* Metadata row */}
+                        <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-[#527D6F]">
+                          <span className="flex items-center gap-1">
+                            <BookOpen className="h-3 w-3" /> {paper.subject}
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <Calendar className="h-3 w-3" />
+                            {new Date(paper.createdAt).toLocaleDateString()}
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <Clock className="h-3 w-3" /> {paper.duration}
+                          </span>
+                          <span className="text-[#94B49C] font-medium shrink-0">{paper.totalMarks} marks</span>
                         </div>
-                      )}
+
+                        {/* Tag chips */}
+                        {hasTags && (
+                          <div className="mt-2 flex flex-wrap gap-1.5">
+                            {paper.tags!.map(t => (
+                              <button
+                                key={t}
+                                onClick={() => setActiveTagFilter(
+                                  activeTagFilter === t ? null : t
+                                )}
+                                title={activeTagFilter === t ? "Clear filter" : `Filter by "${t}"`}
+                                className={`flex items-center gap-1 px-2 py-0.5 rounded-full
+                                  text-[10px] font-medium transition-all ${
+                                    activeTagFilter === t
+                                      ? "text-[#D5E2D6]"
+                                      : "text-[#527D6F] hover:text-[#94B49C]"
+                                  }`}
+                                style={{
+                                  background: activeTagFilter === t
+                                    ? "rgba(82,125,111,0.35)"
+                                    : "rgba(82,125,111,0.12)",
+                                  border: "1px solid rgba(148,180,156,0.15)",
+                                }}
+                              >
+                                <Tag className="w-2.5 h-2.5" />
+                                {t}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     </div>
 
                     {/* Right-side buttons */}
-                    <div className="flex items-center gap-1 shrink-0 mt-0.5">
+                    <div className="flex items-center justify-between sm:justify-end gap-1.5 shrink-0 mt-1 sm:mt-0.5 sm:ml-auto w-full sm:w-auto border-t sm:border-t-0 border-[rgba(148,180,156,0.08)] pt-2.5 sm:pt-0">
                       {/* Sections badge */}
                       <span className="fm-badge">
                         {paper.sections.length}{" "}
                         {paper.sections.length === 1 ? "section" : "sections"}
                       </span>
 
-                      {/* Tag button */}
-                      <button
-                        onClick={() => toggleTagEdit(paper.id)}
-                        title="Edit tags"
-                        className={`ml-1 p-2 rounded-lg transition-all ${
-                          isEditingTag
-                            ? "text-[#94B49C] bg-[rgba(82,125,111,0.18)] opacity-100"
-                            : "text-[#527D6F] hover:text-[#94B49C] hover:bg-[rgba(82,125,111,0.1)] opacity-0 group-hover:opacity-100"
-                        }`}
-                      >
-                        <Tag className="h-4 w-4" />
-                      </button>
+                      <div className="flex items-center gap-1">
+                        {/* Tag button */}
+                        <button
+                          onClick={() => toggleTagEdit(paper.id)}
+                          title="Edit tags"
+                          className={`p-2 rounded-lg transition-all ${
+                            isEditingTag
+                              ? "text-[#94B49C] bg-[rgba(82,125,111,0.18)] opacity-100"
+                              : "text-[#527D6F] hover:text-[#94B49C] hover:bg-[rgba(82,125,111,0.1)] lg:opacity-0 group-hover:lg:opacity-100 opacity-100"
+                          }`}
+                        >
+                          <Tag className="h-4 w-4" />
+                        </button>
 
-                      {/* Trash button */}
-                      <button
-                        onClick={() => handleDeleteClick(paper.id)}
-                        title={isPending ? "Cancel delete" : "Delete paper"}
-                        className={`p-2 rounded-lg transition-all ${
-                          isPending
-                            ? 'text-[#c0504a] bg-[rgba(192,80,74,0.12)] opacity-100'
-                            : 'text-[#527D6F] hover:text-[#c0504a] hover:bg-[rgba(192,80,74,0.1)] opacity-0 group-hover:opacity-100'
-                        }`}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
+                        {/* Trash button */}
+                        <button
+                          onClick={() => handleDeleteClick(paper.id)}
+                          title={isPending ? "Cancel delete" : "Delete paper"}
+                          className={`p-2 rounded-lg transition-all ${
+                            isPending
+                              ? 'text-[#c0504a] bg-[rgba(192,80,74,0.12)] opacity-100'
+                              : 'text-[#527D6F] hover:text-[#c0504a] hover:bg-[rgba(192,80,74,0.1)] lg:opacity-0 group-hover:lg:opacity-100 opacity-100'
+                          }`}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
                     </div>
                   </div>
 

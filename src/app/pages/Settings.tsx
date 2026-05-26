@@ -113,7 +113,20 @@ export function SettingsPage() {
     if (ok) setTimeout(() => setTestResult(null), 3000);
   };
 
-  const saveLM = () => { saveLMStudioConfig(cfg); toast.success("LM Studio settings saved!"); };
+  const saveLM = () => {
+    const maxT = Math.max(256, Math.min(8192, cfg.maxTokens));
+    const contextC = Math.max(1000, Math.min(32000, cfg.contextChars));
+    
+    const updatedCfg = { ...cfg, maxTokens: maxT, contextChars: contextC };
+    setCfg(updatedCfg);
+    saveLMStudioConfig(updatedCfg);
+    
+    if (cfg.maxTokens > 8192 || cfg.contextChars > 32000) {
+      toast.warning("Settings clamped to safe limits (Max Tokens: 8192, Context Chars: 32000) to protect local hardware.");
+    } else {
+      toast.success("LM Studio settings saved!");
+    }
+  };
 
   // ── Profile save ──
   const handleSaveProfile = () => {
@@ -152,7 +165,7 @@ export function SettingsPage() {
   const storageStats = sourceService.getStorageStats();
 
   return (
-    <div className="max-w-3xl mx-auto px-6 py-10 fm-fadein space-y-6">
+    <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8 sm:py-10 fm-fadein space-y-6">
 
       {/* Header */}
       <div className="mb-2">
@@ -319,7 +332,7 @@ export function SettingsPage() {
 
       {/* ── Storage & Data ── */}
       <Card title="Storage & Data" icon={HardDrive}>
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           {[
             { label: "Papers",    value: stats.papers,    icon: FileText },
             { label: "Sources",   value: stats.sources,   icon: BookOpen },
@@ -356,24 +369,29 @@ export function SettingsPage() {
           ]).map(({ key, label, count, color }) => (
             <div key={key}>
               {confirmClear === key ? (
-                <div className="flex items-center gap-3 px-4 py-3 rounded-xl"
-                  style={{ background: "rgba(192,80,74,0.08)", border: "1px solid rgba(192,80,74,0.25)" }}>
-                  <AlertTriangle className="w-4 h-4 text-[#c0504a] shrink-0" />
-                  <p className="flex-1 text-sm text-[#c0504a]">
-                    Really {label.toLowerCase()}? ({count} item{count !== 1 ? "s" : ""})
-                  </p>
-                  <button onClick={() => setConfirmClear(null)}
-                    className="px-3 py-1.5 rounded-lg text-xs font-medium text-[#94B49C]
-                      hover:bg-[rgba(82,125,111,0.15)] transition-all">
-                    Cancel
-                  </button>
-                  <button onClick={() => handleClear(key)}
-                    className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white
-                      hover:opacity-90 transition-all"
-                    style={{ background: "rgba(192,80,74,0.85)" }}>
-                    Yes, delete
-                  </button>
-                </div>
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-3 px-4 py-3 rounded-xl"
+                    style={{ background: "rgba(192,80,74,0.08)", border: "1px solid rgba(192,80,74,0.25)" }}>
+                    <div className="flex items-center gap-2 flex-1 min-w-0">
+                      <AlertTriangle className="w-4 h-4 text-[#c0504a] shrink-0" />
+                      <p className="text-sm text-[#c0504a] truncate">
+                        Really {label.toLowerCase()}? ({count} item{count !== 1 ? "s" : ""})
+                      </p>
+                    </div>
+                    <div className="flex gap-2 shrink-0 self-end sm:self-auto sm:ml-auto">
+                      <button onClick={() => setConfirmClear(null)}
+                        className="px-3 py-1.5 rounded-lg text-xs font-medium text-[#94B49C]
+                          hover:bg-[rgba(82,125,111,0.15)] transition-all bg-[rgba(82,125,111,0.05)]"
+                      >
+                        Cancel
+                      </button>
+                      <button onClick={() => handleClear(key)}
+                        className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white
+                          hover:opacity-90 transition-all"
+                        style={{ background: "rgba(192,80,74,0.85)" }}>
+                        Delete
+                      </button>
+                    </div>
+                  </div>
               ) : (
                 <button
                   onClick={() => setConfirmClear(key)}

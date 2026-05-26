@@ -48,14 +48,14 @@ export function Home() {
   ];
 
   return (
-    <div className="max-w-5xl mx-auto px-6 py-10 fm-fadein">
+    <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8 sm:py-10 fm-fadein">
 
       {/* ── Greeting ── */}
-      <div className="mb-10">
+      <div className="mb-8 sm:mb-10">
         <p className="text-xs font-semibold tracking-widest text-[#527D6F] uppercase mb-1">
           Overview
         </p>
-        <h1 className="text-3xl font-bold text-[#D5E2D6]"
+        <h1 className="text-2xl sm:text-3xl font-bold text-[#D5E2D6]"
           style={{ fontFamily: "'Playfair Display', serif" }}>
           {greeting()}, {name}
         </h1>
@@ -65,7 +65,7 @@ export function Home() {
       </div>
 
       {/* ── Stats strip ── */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-10">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8 sm:mb-10">
         {stats.map((s, i) => (
           <Link key={i} to={s.href}
             className="fm-glass p-5 rounded-xl group transition-all hover:bg-[rgba(82,125,111,0.12)]"
@@ -84,43 +84,43 @@ export function Home() {
       </div>
 
       {/* ── Quick actions ── */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-10">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8 sm:mb-10">
         <Link to="/new"
-          className="fm-glass rounded-2xl px-6 py-5 flex items-center gap-4 group
+          className="fm-glass rounded-2xl px-5 sm:px-6 py-5 flex items-center gap-4 group
             transition-all hover:bg-[rgba(82,125,111,0.12)]">
           <div className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0 fm-float"
             style={{ background: "linear-gradient(135deg,#527D6F,#94B49C)" }}>
             <Plus className="w-5 h-5 text-[#2F3E46]" />
           </div>
-          <div>
-            <p className="text-sm font-semibold text-[#D5E2D6] group-hover:text-white transition-colors">
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold text-[#D5E2D6] group-hover:text-white transition-colors truncate">
               Generate New Paper
             </p>
-            <p className="text-xs text-[#527D6F] mt-0.5">
+            <p className="text-xs text-[#527D6F] mt-0.5 truncate sm:overflow-visible sm:whitespace-normal">
               Upload a PDF and build an exam from scratch
             </p>
           </div>
-          <ChevronRight className="w-4 h-4 text-[#3a5560] group-hover:text-[#527D6F] ml-auto transition-colors" />
+          <ChevronRight className="w-4 h-4 text-[#3a5560] group-hover:text-[#527D6F] ml-auto transition-colors shrink-0" />
         </Link>
 
         <Link to="/sources"
-          className="fm-glass rounded-2xl px-6 py-5 flex items-center gap-4 group
+          className="fm-glass rounded-2xl px-5 sm:px-6 py-5 flex items-center gap-4 group
             transition-all hover:bg-[rgba(82,125,111,0.12)]">
           <div className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0 fm-float"
             style={{ background: "rgba(82,125,111,0.2)", animationDelay: "0.2s" }}>
             <BookOpen className="w-5 h-5 text-[#94B49C]" />
           </div>
-          <div>
-            <p className="text-sm font-semibold text-[#D5E2D6] group-hover:text-white transition-colors">
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold text-[#D5E2D6] group-hover:text-white transition-colors truncate">
               Browse Source Library
             </p>
-            <p className="text-xs text-[#527D6F] mt-0.5">
+            <p className="text-xs text-[#527D6F] mt-0.5 truncate sm:overflow-visible sm:whitespace-normal">
               {sources.length > 0
                 ? `${sources.length} PDF${sources.length !== 1 ? "s" : ""} ready to use`
                 : "Upload PDFs once, reuse them forever"}
             </p>
           </div>
-          <ChevronRight className="w-4 h-4 text-[#3a5560] group-hover:text-[#527D6F] ml-auto transition-colors" />
+          <ChevronRight className="w-4 h-4 text-[#3a5560] group-hover:text-[#527D6F] ml-auto transition-colors shrink-0" />
         </Link>
       </div>
 
@@ -142,7 +142,7 @@ export function Home() {
         </div>
 
         {recentPapers.length === 0 ? (
-          <div className="fm-glass rounded-2xl p-12 flex flex-col items-center text-center">
+          <div className="fm-glass rounded-2xl p-8 sm:p-12 flex flex-col items-center text-center">
             <div className="w-16 h-16 rounded-2xl flex items-center justify-center mb-4 fm-float"
               style={{ background: "rgba(82,125,111,0.15)", border: "1px solid rgba(82,125,111,0.25)" }}>
               <Sparkles className="w-8 h-8 text-[#94B49C]" />
@@ -163,21 +163,23 @@ export function Home() {
                 <li key={paper.id}
                   className="group hover:bg-[rgba(82,125,111,0.08)] transition-colors"
                   style={{ animationDelay: `${i * 50}ms` }}>
-                  <Link to={`/paper/${paper.id}`} className="px-6 py-4 flex items-center gap-4">
-                    <div className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0"
-                      style={{ background: "rgba(82,125,111,0.18)" }}>
-                      <FileText className="w-4 h-4 text-[#94B49C]" />
+                  <Link to={`/paper/${paper.id}`} className="px-4 sm:px-6 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0"
+                        style={{ background: "rgba(82,125,111,0.18)" }}>
+                        <FileText className="w-4 h-4 text-[#94B49C]" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-[#D5E2D6] truncate
+                          group-hover:text-[#94B49C] transition-colors">
+                          {paper.title}
+                        </p>
+                        <p className="text-xs text-[#527D6F] mt-0.5">
+                          {paper.subject} · {new Date(paper.createdAt).toLocaleDateString()}
+                        </p>
+                      </div>
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold text-[#D5E2D6] truncate
-                        group-hover:text-[#94B49C] transition-colors">
-                        {paper.title}
-                      </p>
-                      <p className="text-xs text-[#527D6F] mt-0.5">
-                        {paper.subject} · {new Date(paper.createdAt).toLocaleDateString()}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-3 shrink-0">
+                    <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0 sm:ml-auto">
                       <span className="fm-badge">{paper.totalMarks} marks</span>
                       {(paper.tags?.length ?? 0) > 0 && (
                         <span className="flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full
@@ -188,7 +190,7 @@ export function Home() {
                           {paper.tags!.length > 1 && ` +${paper.tags!.length - 1}`}
                         </span>
                       )}
-                      <ChevronRight className="w-4 h-4 text-[#3a5560] group-hover:text-[#527D6F] transition-colors" />
+                      <ChevronRight className="w-4 h-4 text-[#3a5560] group-hover:text-[#527D6F] transition-colors hidden sm:block" />
                     </div>
                   </Link>
                 </li>
