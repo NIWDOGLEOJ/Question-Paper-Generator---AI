@@ -188,8 +188,29 @@ function samplePdfText(
 const BLOOMS_PROMPT: Record<string, { level: string; description: string; exampleVerbs: string }> = {
   Easy:   { level: "Remember / Understand", description: "recall facts, define terms, describe from memory",       exampleVerbs: "Define, List, Identify, Name, State, Describe, Recall, Summarise" },
   Medium: { level: "Apply / Analyse",        description: "apply to a context, explain relationships, break down", exampleVerbs: "Explain, Compare, Classify, Differentiate, Apply, Examine, Illustrate, Solve" },
-  Hard:   { level: "Evaluate / Create",      description: "judge evidence, assess claims, justify positions",      exampleVerbs: "Evaluate, Justify, Critique, Assess, Construct, Synthesise, Design, Formulate" },
+  Hard:   { level: "Evaluate / Create",       description: "critique, justify, design, synthesize new solutions",   exampleVerbs: "Evaluate, Critique, Justify, Formulate, Design, Synthesise, Solve Complex" }
 };
+
+const CBSE_PROMPT = `
+BOARD-SPECIFIC RULES (CBSE Board Exam Style):
+- MCQs can be regular multiple choice or **Assertion-Reasoning** questions.
+- If generating an Assertion-Reasoning question, use this exact structure:
+  Assertion (A): [Factual statement about curriculum]
+  Reason (R): [Explanation statement]
+  A) Both A and R are true and R is the correct explanation of A.
+  B) Both A and R are true but R is not the correct explanation of A.
+  C) A is true but R is false.
+  D) A is false but R is true.
+  Answer: [Correct letter, e.g. A, B, C, or D]
+- Calibrate difficulty to test conceptual understanding rather than simple memorization (Bloom's Apply/Analyse level).
+`;
+
+const TN_MATRIC_PROMPT = `
+BOARD-SPECIFIC RULES (Tamil Nadu Matriculation Samacheer Board Style):
+- Focus on direct, clear textbook definitions, standard principles, and statements of laws.
+- Questions should be clear, direct, and unambiguous, matching the standard Samacheer Kalvi matriculation board exam style.
+- MCQs should have four clear distinct options. Short answer questions should ask for direct statements (e.g. "State Newton's Second Law", "Define permittivity", "Explain the function of X").
+`;
 
 // ── Build a tight, well-structured prompt per question type ──
 function buildPrompt(
@@ -199,12 +220,25 @@ function buildPrompt(
   subjectType:  SubjectType = 'general',
   stemProblems: string[]    = [],
   academicLevel: string     = "High School",
-  isPromptMode?: boolean
+  isPromptMode?: boolean,
+  institutionStyle: 'cbse' | 'tn_matric' | 'standard' = 'standard',
+  customInstructions?: string
 ): string {
   const { count, type, difficulty, marks } = section;
   const bloom     = BLOOMS_PROMPT[difficulty] ?? BLOOMS_PROMPT.Medium;
   const typeLC    = type.toLowerCase();
   const stemBlock = subjectType !== 'general' ? '\n\n' + STEM_PROMPT[subjectType as Exclude<SubjectType,'general'>] : '';
+  
+  let boardBlock = '';
+  if (institutionStyle === 'cbse') {
+    boardBlock = '\n\n' + CBSE_PROMPT;
+  } else if (institutionStyle === 'tn_matric') {
+    boardBlock = '\n\n' + TN_MATRIC_PROMPT;
+  }
+
+  if (customInstructions) {
+    boardBlock += `\n\nCUSTOM SCHOOL STYLE INSTRUCTIONS:\n- You MUST strictly mimic the following school-specific questioning style, structures, and guidelines: ${customInstructions}`;
+  }
 
   // ── Symbol handling guidance for STEM ────────────────────────────────
   // pdfjs often corrupts or drops math symbols. Instruct the LLM to handle gracefully.
@@ -219,8 +253,13 @@ SYMBOL / FORMULA HANDLING:
   let example = '';
 
   if (typeLC.includes('multiple choice') || typeLC.includes('mcq')) {
-    format  = 'Numbered list. Each question: question text, then exactly 4 options (A) B) C) D)), then "Answer: X" (the correct letter only).';
-    example = `1. What is the main function of X?\nA) Option one\nB) Option two\nC) Option three\nD) Option four\nAnswer: A\n\n2. Which best describes Y?\nA) Desc one\nB) Desc two\nC) Desc three\nD) Desc four\nAnswer: C`;
+    if (institutionStyle === 'cbse') {
+      format = 'Numbered list. MCQs can be regular multiple choice or Assertion-Reasoning type questions. Each question: question text, then exactly 4 options (A) B) C) D)), then "Answer: X" (the correct letter only).';
+      example = `1. What is the main function of chloroplasts?\nA) Energy production\nB) Photosynthesis\nC) Protein synthesis\nD) Waste disposal\nAnswer: B\n\n2. Assertion (A): Mitochondria are known as the powerhouses of the cell.\nReason (R): They generate most of the chemical energy needed to power the cell's biochemical reactions.\nA) Both A and R are true and R is the correct explanation of A.\nB) Both A and R are true but R is not the correct explanation of A.\nC) A is true but R is false.\nD) A is false but R is true.\nAnswer: A`;
+    } else {
+      format  = 'Numbered list. Each question: question text, then exactly 4 options (A) B) C) D)), then "Answer: X" (the correct letter only).';
+      example = `1. What is the main function of X?\nA) Option one\nB) Option two\nC) Option three\nD) Option four\nAnswer: A\n\n2. Which best describes Y?\nA) Desc one\nB) Desc two\nC) Desc three\nD) Desc four\nAnswer: C`;
+    }
   } else if (typeLC.includes('true') || typeLC.includes('false')) {
     format  = 'Numbered list. Each item: a factual statement, then "Answer: True" or "Answer: False" on the next line.';
     example = `1. X is defined as Y.\nAnswer: True\n\n2. The process of Z involves only W.\nAnswer: False`;
@@ -250,7 +289,7 @@ CRITICAL REQUIREMENTS:
 """
 ${pdfSample}
 """
-${stemBlock}
+${stemBlock}${boardBlock}
 5. FORMATTING: You MUST follow the exact format below. Do not add conversational text, introductions, or conclusions.
 
 OUTPUT FORMAT — follow this exactly:
@@ -281,7 +320,7 @@ CRITICAL REQUIREMENTS:
 1. Target Audience: These questions MUST be strictly calibrated for a ${academicLevel} level. Do not generate overly basic or overly advanced questions for this level.
 2. Difficulty: ${difficulty}. ${bloom.level} — ${bloom.description}. Preferred question verbs: ${bloom.exampleVerbs}.
 3. Marks: Each question is worth ${marks} marks.
-4. Accuracy: Do NOT hallucinate. Every fact, concept, or equation must be grounded in the text.${stemBlock}${symbolGuidance}${problemsBlock}
+4. Accuracy: Do NOT hallucinate. Every fact, concept, or equation must be grounded in the text.${stemBlock}${symbolGuidance}${problemsBlock}${boardBlock}
 5. FORMATTING: You MUST follow the exact format below. Do not add conversational text, introductions, or conclusions.
 
 TEXTBOOK EXCERPT:
@@ -305,6 +344,7 @@ RULES:
 - Do NOT add section headers, preamble, or closing remarks.
 - Start immediately with "1."`;
 }
+
 
 // ── Core LLM call — streaming mode to avoid timeouts on slow local models ──
 async function callLLM(
@@ -538,13 +578,15 @@ export async function generateQuestionsWithLLM(
   subjectType:  SubjectType = 'general',
   stemProblems: string[]    = [],
   academicLevel: string     = "High School",
-  isPromptMode?: boolean
+  isPromptMode?: boolean,
+  institutionStyle: 'cbse' | 'tn_matric' | 'standard' = 'standard',
+  customInstructions?: string
 ): Promise<Question[]> {
   const config = getLMStudioConfig();
   if (!config.enabled) throw new Error('LM Studio is not enabled');
   if (!config.model)   throw new Error('No model selected. Please pick a model in LM Studio Settings.');
 
-  console.log(`[LLM] Section "${section.name}" — ${section.count}× ${section.type} [${subjectType}] stemProblems=${stemProblems.length} isPromptMode=${isPromptMode}`);
+  console.log(`[LLM] Section "${section.name}" — ${section.count}× ${section.type} [${subjectType}] stemProblems=${stemProblems.length} isPromptMode=${isPromptMode} style=${institutionStyle}`);
   
   const totalQuestions = section.count;
   const totalBatches = Math.ceil(totalQuestions / MAX_Q_PER_BATCH);
@@ -560,14 +602,14 @@ export async function generateQuestionsWithLLM(
       const sample = isPromptMode
         ? pdfText
         : samplePdfText(pdfText, config.contextChars, subjectType, batchIdx, totalBatches);
-      const prompt = buildPrompt(sample, batchSection, subject, subjectType, stemProblems, academicLevel, isPromptMode);
+      const prompt = buildPrompt(sample, batchSection, subject, subjectType, stemProblems, academicLevel, isPromptMode, institutionStyle, customInstructions);
       raw = await callLLM(prompt, config);
     } catch (err: any) {
       if (err.message && err.message.includes('Context Length Exceeded') && !isPromptMode) {
         console.warn(`[LLM] Context length exceeded on batch ${batchIdx + 1}! Retrying with 50% reduced context and 1024 max tokens...`);
         const fallbackConfig = { ...config, contextChars: Math.floor(config.contextChars / 2), maxTokens: 1024 };
         const fallbackSample = samplePdfText(pdfText, fallbackConfig.contextChars, subjectType, batchIdx, totalBatches);
-        const fallbackPrompt = buildPrompt(fallbackSample, batchSection, subject, subjectType, stemProblems.slice(0, 5), academicLevel);
+        const fallbackPrompt = buildPrompt(fallbackSample, batchSection, subject, subjectType, stemProblems.slice(0, 5), academicLevel, isPromptMode, institutionStyle, customInstructions);
         raw = await callLLM(fallbackPrompt, fallbackConfig);
       } else {
         throw err;
@@ -591,4 +633,123 @@ export async function generateQuestionsWithLLM(
   
   // If we slightly over-generated due to parsing quirks, truncate to the requested count
   return allQuestions.slice(0, section.count);
+}
+
+// ── Learn model blueprint from past year paper PDF ──
+export async function learnBlueprintFromPaper(pdfText: string): Promise<{
+  name: string;
+  duration: string;
+  institutionStyle: 'cbse' | 'tn_matric' | 'standard';
+  sections: Array<{
+    name: string;
+    type: string;
+    count: number;
+    marks: number;
+    difficulty: string;
+    instructions: string;
+  }>;
+  customInstructions?: string;
+  schoolName?: string;
+}> {
+  const config = getLMStudioConfig();
+  if (!config.enabled) {
+    throw new Error("Local AI (LM Studio) must be enabled in Settings to analyze past papers.");
+  }
+
+  const prompt = `You are an expert curriculum assistant. Analyze the following text extracted from a past exam question paper.
+Your task is to analyze the layout, structure, sections, questions, and marks to extract a clean structural blueprint in JSON format.
+
+First, identify if this question paper is CBSE, Tamil Nadu Matriculation (Samacheer), or a generic Standard paper.
+Second, extract:
+- Any school or institution name mentioned (e.g. "DAV Public School", "St. Mary's School", "SSLC Model").
+- Time duration (e.g. "3 Hours", "180 Minutes", extract just the minutes like "180" or "150").
+- The exact sections (or Parts, e.g. Section A, PART-I).
+- For each section, find:
+  * The exact Name (e.g., "Section A")
+  * The typical Question Type ("Multiple Choice" | "True / False" | "Short Answer" | "Long Answer / Essay" | "Fill in the Blanks")
+  * The exact count of questions in that section
+  * The marks allocated per question in that section
+  * The specific section instructions (e.g. "Answer all questions. Each question carries 1 mark.")
+- Synthesize any unique school-specific instructions, layout choices, or patterns observed in the paper into a compact paragraph of "customInstructions" (e.g., "Contains a compulsory matching question at the end. Uses direct statement-type short answers.").
+
+CRITICAL RULES:
+1. You MUST respond with ONLY the JSON object. Do not include any conversational filler, markdown formatting (like \`\`\`json), or explanations outside of the JSON.
+2. Ensure the JSON is completely valid and parsable.
+3. Map question types strictly to: "Multiple Choice", "True / False", "Short Answer", "Long Answer / Essay", or "Fill in the Blanks".
+4. If a section contains a mix of question types, represent them with the predominant type or split them logically.
+
+JSON Output Schema:
+{
+  "schoolName": "School Name or 'Standard School'",
+  "duration": "180",
+  "institutionStyle": "cbse" | "tn_matric" | "standard",
+  "sections": [
+    {
+      "name": "Section A",
+      "type": "Multiple Choice",
+      "count": 20,
+      "marks": 1,
+      "difficulty": "Mixed",
+      "instructions": "All questions are compulsory."
+    }
+  ],
+  "customInstructions": "Synthesized observation of patterns or specific question rules."
+}
+
+---
+Past Exam Paper Text (First 10,000 characters):
+${pdfText.slice(0, 10_000)}
+---
+
+JSON Response:`;
+
+  const responseText = await callLLM(prompt, config);
+  
+  // Clean up potential markdown formatting or text surrounding the JSON
+  let cleanJsonText = responseText.trim();
+  const jsonStart = cleanJsonText.indexOf('{');
+  const jsonEnd = cleanJsonText.lastIndexOf('}');
+  if (jsonStart !== -1 && jsonEnd !== -1) {
+    cleanJsonText = cleanJsonText.slice(jsonStart, jsonEnd + 1);
+  }
+
+  try {
+    const parsed = JSON.parse(cleanJsonText);
+    
+    // Validate and clean up types
+    if (!parsed.sections || !Array.isArray(parsed.sections)) {
+      throw new Error("Invalid response format: 'sections' array missing.");
+    }
+    
+    const validStyles = ['cbse', 'tn_matric', 'standard'];
+    const style = validStyles.includes(parsed.institutionStyle) ? parsed.institutionStyle : 'standard';
+
+    const cleanedSections = parsed.sections.map((s: any) => {
+      const allowedTypes = ["Multiple Choice", "True / False", "Short Answer", "Long Answer / Essay", "Fill in the Blanks"];
+      const type = allowedTypes.includes(s.type) ? s.type : "Short Answer";
+      return {
+        name: String(s.name || "Section"),
+        type,
+        count: Math.max(1, Number(s.count) || 5),
+        marks: Math.max(1, Number(s.marks) || 1),
+        difficulty: String(s.difficulty || "Mixed"),
+        instructions: String(s.instructions || `Answer all questions.`),
+      };
+    });
+
+    return {
+      name: String(parsed.schoolName || parsed.name || "Learned Model"),
+      duration: String(parsed.duration || "120"),
+      institutionStyle: style,
+      sections: cleanedSections,
+      customInstructions: parsed.customInstructions ? String(parsed.customInstructions) : undefined,
+      schoolName: parsed.schoolName ? String(parsed.schoolName) : undefined,
+    };
+  } catch (err) {
+    console.error("[LLM Model Parser Error]", err, "Raw text:", responseText);
+    throw new Error(
+      "Failed to parse the question paper model. Please ensure LM Studio is running " +
+      "and loaded with a capable model that outputs clean JSON."
+    );
+  }
 }

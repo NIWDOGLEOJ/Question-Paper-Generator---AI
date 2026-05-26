@@ -13,6 +13,7 @@ const navItems = [
   { icon: Home,      label: "Dashboard",       href: "/"         },
   { icon: FileText,  label: "Question Papers",  href: "/papers"   },
   { icon: BookOpen,  label: "Source Material",  href: "/sources"  },
+  { icon: Sparkles,  label: "Paper Models",     href: "/models"   },
   { icon: Settings,  label: "Settings",         href: "/settings" },
 ];
 

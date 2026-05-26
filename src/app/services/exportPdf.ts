@@ -167,6 +167,38 @@ function addFooter(
   doc.text(`Page ${pageNum} of ${totalPages}`, PAGE_W - MARGIN, y, { align: 'right' });
 }
 
+function getCBSEInstructions(paper: Paper): string[] {
+  const instr: string[] = [
+    "General Instructions:",
+    "1. Candidate must write his/her Roll Number in the space provided on the top-right corner.",
+    "2. Please check that this question paper contains all sections and questions as specified below.",
+    `3. The question paper contains ${paper.sections.length} sections (${paper.sections.map((_, i) => String.fromCharCode(65 + i)).join(', ')}).`,
+  ];
+  
+  paper.sections.forEach((sec, idx) => {
+    const secLetter = String.fromCharCode(65 + idx);
+    const count = sec.questions.length;
+    const marks = sec.questions[0]?.marks ?? 1;
+    let desc = "";
+    if (sec.type === 'Multiple Choice') {
+      desc = "Multiple Choice / Assertion-Reasoning";
+    } else if (sec.type === 'True / False') {
+      desc = "True/False questions";
+    } else if (sec.type === 'Short Answer' && marks === 2) {
+      desc = "Very Short Answer type";
+    } else if (sec.type === 'Short Answer') {
+      desc = "Short Answer type";
+    } else {
+      desc = "Long Answer / Case-Based";
+    }
+    instr.push(`   - Section ${secLetter} comprises ${count} questions of ${marks} mark${marks > 1 ? 's' : ''} each (${desc}).`);
+  });
+  
+  instr.push("4. All Questions are compulsory. Internal choices may be provided.");
+  instr.push("5. Use of calculators or electronic devices is strictly prohibited.");
+  return instr;
+}
+
 // ── Render the question paper body (shared by both modes) ──
 function renderBody(doc: jsPDF, paper: Paper): { y: number; pageNum: number } {
   let y       = MARGIN;
@@ -180,7 +212,64 @@ function renderBody(doc: jsPDF, paper: Paper): { y: number; pageNum: number } {
     }
   };
 
-  // Header
+  const style = paper.institutionStyle ?? 'standard';
+
+  // Render top roll number grid if CBSE is requested (even with a school name)
+  if (style === 'cbse') {
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8.5);
+    doc.setTextColor(...C.darkGrey);
+    const rollX = PAGE_W - MARGIN - 32;
+    doc.text('Roll No.', rollX - 14, y + 3);
+    doc.setDrawColor(...C.darkGrey);
+    doc.setLineWidth(0.2);
+    for (let i = 0; i < 8; i++) {
+      doc.rect(rollX + i * 4, y, 4, 4);
+    }
+    y += 7;
+  }
+
+  if (paper.schoolName) {
+    // Custom School Header
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(12);
+    doc.setTextColor(...C.black);
+    doc.text(paper.schoolName.toUpperCase(), PAGE_W / 2, y, { align: 'center' });
+    y += 5;
+    
+    // Affiliation Line
+    doc.setFont('helvetica', 'italic');
+    doc.setFontSize(9.5);
+    doc.setTextColor(...C.darkGrey);
+    if (style === 'cbse') {
+      doc.text('Affiliated to Central Board of Secondary Education', PAGE_W / 2, y, { align: 'center' });
+    } else if (style === 'tn_matric') {
+      doc.text('Tamil Nadu Matriculation (Samacheer Kalvi) Curriculum', PAGE_W / 2, y, { align: 'center' });
+    } else {
+      doc.text('Standard Curriculum Framework', PAGE_W / 2, y, { align: 'center' });
+    }
+    y += 6.5;
+  } else {
+    // Standard Board Style Headers
+    if (style === 'cbse') {
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(10.5);
+      doc.setTextColor(...C.black);
+      doc.text('CENTRAL BOARD OF SECONDARY EDUCATION', PAGE_W / 2, y, { align: 'center' });
+      y += 5.5;
+    } else if (style === 'tn_matric') {
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(10);
+      doc.setTextColor(...C.black);
+      doc.text('GOVERNMENT OF TAMIL NADU', PAGE_W / 2, y, { align: 'center' });
+      y += 4.5;
+      doc.setFontSize(9);
+      doc.text('DEPARTMENT OF SCHOOL EDUCATION', PAGE_W / 2, y, { align: 'center' });
+      y += 6;
+    }
+  }
+
+  // Common Subject/Title block
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(FS.title);
   doc.setTextColor(...C.black);
@@ -202,32 +291,98 @@ function renderBody(doc: jsPDF, paper: Paper): { y: number; pageNum: number } {
   hRule(doc, y, C.ruleDark, 0.6);
   y += 6;
 
-  for (const section of paper.sections) {
-    ensureSpace(20);
+  // Render CBSE dynamic instructions card
+  if (style === 'cbse') {
+    const instr = getCBSEInstructions(paper);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8.5);
+    let totalH = 4; // padding
+    const wrappedLines: string[] = [];
+    for (const line of instr) {
+      const isHeader = line.startsWith("General");
+      const fontSize = isHeader ? 9.5 : 8.5;
+      doc.setFontSize(fontSize);
+      doc.setFont('helvetica', isHeader ? 'bold' : 'normal');
+      const lines = doc.splitTextToSize(line, CONTENT_W - 8) as string[];
+      wrappedLines.push(...lines.map(l => `${isHeader ? 'H:' : ''}${l}`));
+      totalH += lines.length * 4.2;
+    }
+    totalH += 2; // padding
 
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(FS.sectionHead);
-    doc.setTextColor(...C.black);
-    doc.text(section.name, MARGIN, y);
-    y += 5;
-
-    doc.setDrawColor(...C.darkGrey);
+    ensureSpace(totalH + 10);
+    
+    // Draw card
+    doc.setFillColor(...C.greenBg);
+    doc.setDrawColor(...C.green);
     doc.setLineWidth(0.3);
-    doc.line(MARGIN, y, MARGIN + doc.getTextWidth(section.name), y);
-    y += 3;
+    doc.roundedRect(MARGIN, y, CONTENT_W, totalH, 2, 2, 'FD');
+    
+    let curY = y + 4;
+    for (const line of wrappedLines) {
+      const isHeader = line.startsWith('H:');
+      const cleanLine = isHeader ? line.slice(2) : line;
+      doc.setFont('helvetica', isHeader ? 'bold' : 'normal');
+      doc.setFontSize(isHeader ? 9.5 : 8.5);
+      doc.setTextColor(isHeader ? C.black[0] : C.darkGrey[0], isHeader ? C.black[1] : C.darkGrey[1], isHeader ? C.black[2] : C.darkGrey[2]);
+      doc.text(cleanLine, MARGIN + 4, curY);
+      curY += 4.2;
+    }
+    y += totalH + 6;
+  }
 
-    doc.setFont('helvetica', 'italic');
-    doc.setFontSize(FS.instruction);
-    doc.setTextColor(...C.midGrey);
-    doc.text(section.instructions, MARGIN, y);
-    y += 6;
+  for (const section of paper.sections) {
+    ensureSpace(25);
+
+    if (style === 'tn_matric') {
+      const upperName = section.name.toUpperCase();
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(FS.sectionHead + 1);
+      doc.setTextColor(...C.black);
+      doc.text(upperName, PAGE_W / 2, y, { align: 'center' });
+      
+      const nameWidth = doc.getTextWidth(upperName);
+      const startX = (PAGE_W - nameWidth) / 2;
+      y += 2.5;
+      
+      doc.setDrawColor(...C.darkGrey);
+      doc.setLineWidth(0.25);
+      doc.line(startX, y, startX + nameWidth, y);
+      y += 0.8;
+      doc.line(startX, y, startX + nameWidth, y);
+      y += 4;
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(FS.instruction);
+      doc.setTextColor(...C.black);
+      const upperInst = section.instructions.toUpperCase();
+      const instLines = wrapText(doc, upperInst, CONTENT_W - 10, FS.instruction);
+      doc.text(instLines, PAGE_W / 2, y, { align: 'center' });
+      y += instLines.length * 4.5 + 4;
+    } else {
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(FS.sectionHead);
+      doc.setTextColor(...C.black);
+      doc.text(section.name, MARGIN, y);
+      y += 5;
+
+      doc.setDrawColor(...C.darkGrey);
+      doc.setLineWidth(0.3);
+      doc.line(MARGIN, y, MARGIN + doc.getTextWidth(section.name), y);
+      y += 3;
+
+      doc.setFont('helvetica', 'italic');
+      doc.setFontSize(FS.instruction);
+      doc.setTextColor(...C.midGrey);
+      doc.text(section.instructions, MARGIN, y);
+      y += 6;
+    }
 
     for (let qi = 0; qi < section.questions.length; qi++) {
       const q          = section.questions[qi];
       const indent     = MARGIN + 7;
       const qWidth     = CONTENT_W - 7;
       const marksLabel = q.marks !== undefined
-        ? `[${q.marks} mark${q.marks !== 1 ? 's' : ''}]`
+        ? (style === 'cbse' ? `[${q.marks}]` : `[${q.marks} mark${q.marks !== 1 ? 's' : ''}]`)
         : '';
 
       const qText = stripLatex(q.text);
@@ -254,9 +409,9 @@ function renderBody(doc: jsPDF, paper: Paper): { y: number; pageNum: number } {
       doc.text(qLines, indent, y);
 
       if (marksLabel) {
-        doc.setFont('helvetica', 'italic');
-        doc.setFontSize(FS.footer);
-        doc.setTextColor(...C.midGrey);
+        doc.setFont('helvetica', style === 'cbse' ? 'bold' : 'italic');
+        doc.setFontSize(style === 'cbse' ? FS.question : FS.footer);
+        doc.setTextColor(style === 'cbse' ? C.black[0] : C.midGrey[0], style === 'cbse' ? C.black[1] : C.midGrey[1], style === 'cbse' ? C.black[2] : C.midGrey[2]);
         doc.text(marksLabel, PAGE_W - MARGIN, y, { align: 'right' });
       }
 
@@ -275,14 +430,15 @@ function renderBody(doc: jsPDF, paper: Paper): { y: number; pageNum: number } {
           doc.text('a) True        b) False', indent + 2, y);
           y += 5.5;
         } else {
-          // Detect if any option has math content — if so use 1-per-line layout
-          // to avoid overflow of long expressions like "(dy/dx)dx"
+          // Detect if any option has math content or is long — if so use 1-per-line layout
+          // to avoid overflow of long expressions or sentences (e.g. CBSE Assertion-Reasoning options)
           const cleanedOpts = q.options.map(o => stripLatex(o));
           const hasMath = cleanedOpts.some(o =>
             /[/√∫∂²³⁰⁴⁵⁶⁷⁸⁹₀₁₂₃₄₅₆₇₈₉αβγδεθλμπσφωΩΣΔΓΠ]/.test(o)
           );
+          const hasLongOpt = cleanedOpts.some(o => o.length > 35);
 
-          if (hasMath) {
+          if (hasMath || hasLongOpt) {
             // One option per line — prevents math expressions from overflowing
             for (let oi = 0; oi < cleanedOpts.length; oi++) {
               const optLines = wrapText(doc, `${labels[oi]}) ${cleanedOpts[oi]}`, CONTENT_W - 14, FS.option);

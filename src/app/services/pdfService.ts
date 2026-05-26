@@ -44,6 +44,12 @@ export interface Paper {
   sourceText?: string;
   /** Whether the paper was generated from a custom prompt/topic rather than a PDF */
   isPromptMode?: boolean;
+  /** Selected institutional board style (e.g. CBSE, Samacheer TN Matriculation) */
+  institutionStyle?: 'cbse' | 'tn_matric' | 'standard';
+  /** School-specific learned questioning pattern guidelines */
+  customInstructions?: string;
+  /** Custom school / institution name */
+  schoolName?: string;
 }
 
 function isSkippablePage(text: string): boolean {
@@ -430,7 +436,10 @@ export async function generateQuestions(
   pdfText: string, sections: Section[], paperTitle: string,
   subject: string, duration: string, fileName: string,
   academicLevel: string = "High School",
-  isPromptMode: boolean = false
+  isPromptMode: boolean = false,
+  institutionStyle: 'cbse' | 'tn_matric' | 'standard' = 'standard',
+  customInstructions: string = "",
+  schoolName: string = ""
 ): Promise<Paper> {
   const t0          = performance.now();
   const useLLM      = getLMStudioConfig().enabled;
@@ -448,24 +457,25 @@ export async function generateQuestions(
   const concepts    = analysis?.concepts ?? [];
   const sentences   = analysis?.sentences ?? [];
   const stemProblems = analysis?.stemProblems ?? [];
-
+ 
   let finalSections: PaperSection[] = [];
-
+ 
   for (let sIdx = 0; sIdx < sections.length; sIdx++) {
     const section = sections[sIdx];
     let questions: Question[];
-
+ 
     if (isPromptMode && !useLLM) {
       throw new Error(
         "Local AI (LM Studio) must be enabled in Settings to generate a paper from custom prompts."
       );
     }
-
+ 
     if (useLLM) {
       try {
         questions = await generateQuestionsWithLLM(
           cleanedText, section, sIdx, subject, subjectType,
-          stemProblems, academicLevel, isPromptMode
+          stemProblems, academicLevel, isPromptMode, institutionStyle,
+          customInstructions
         );
       } catch (err) {
         // DO NOT silently fall back — surface the real error so the user knows LM Studio failed
@@ -481,7 +491,7 @@ export async function generateQuestions(
     }
     finalSections.push({ name: section.name, instructions: getInstructions(section), type: section.type, questions });
   }
-
+ 
   console.log(`generateQuestions [${subjectType}]: ${((performance.now() - t0) / 1000).toFixed(2)}s`);
   return {
     id: `p-${Date.now()}`,
@@ -496,6 +506,9 @@ export async function generateQuestions(
     subjectType,
     sourceText: cleanedText,
     isPromptMode,
+    institutionStyle,
+    customInstructions,
+    schoolName,
   };
 }
 
@@ -1231,7 +1244,9 @@ export async function regenerateSection(
     questions = await generateQuestionsWithLLM(
       text, sectionDef, sectionIdx, paper.subject,
       paper.subjectType ?? 'general', [], paper.academicLevel ?? 'High School',
-      isPromptMode
+      isPromptMode,
+      paper.institutionStyle ?? 'standard',
+      paper.customInstructions
     );
   } else if (text) {
     if (isPromptMode) {

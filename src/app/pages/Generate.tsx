@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from "react";
-import { useNavigate } from "react-router";
+import { useNavigate, useLocation } from "react-router";
 import { Label } from "../components/ui/label";
 import {
   Plus, Trash2, Wand2, CheckCircle2, File, UploadCloud,
@@ -8,7 +8,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import * as pdfService from "../services/pdfService";
-import { getLMStudioConfig } from "../services/lmStudioService";
+import { getLMStudioConfig, learnBlueprintFromPaper } from "../services/lmStudioService";
 import {
   getTemplates, saveTemplate, deleteTemplate,
   createTemplate, BUILTIN_TEMPLATES,
@@ -97,6 +97,340 @@ function SaveTemplateModal({
               disabled:opacity-40 disabled:cursor-not-allowed">
             <Save className="w-3.5 h-3.5" /> Save
           </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Modal to learn structural pattern and school rules from past year PDF ──
+function LearnModelModal({
+  onApply,
+  onClose,
+}: {
+  onApply: (model: {
+    name: string;
+    duration: string;
+    institutionStyle: 'cbse' | 'tn_matric' | 'standard';
+    sections: Array<{ name: string; type: string; count: number; marks: number; difficulty: string; instructions: string; }>;
+    customInstructions?: string;
+    schoolName?: string;
+  }) => void;
+  onClose: () => void;
+}) {
+  const [file, setFile] = useState<File | null>(null);
+  const [stage, setStage] = useState<"upload" | "extracting" | "analysing" | "review">("upload");
+  const [ocrActive, setOcrActive] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+  
+  // Learned model states
+  const [modelName, setModelName] = useState("");
+  const [schoolName, setSchoolName] = useState("");
+  const [duration, setDuration] = useState("120");
+  const [style, setStyle] = useState<'cbse' | 'tn_matric' | 'standard'>('standard');
+  const [sections, setSections] = useState<any[]>([]);
+  const [customInstructions, setCustomInstructions] = useState("");
+
+  const lmEnabled = getLMStudioConfig().enabled;
+
+  const handleDrag = (e: React.DragEvent) => {
+    e.preventDefault();
+    if (e.type === "dragenter" || e.type === "dragover") setIsDragging(true);
+    else if (e.type === "dragleave") setIsDragging(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const dropped = e.dataTransfer.files?.[0];
+    if (dropped && dropped.type === "application/pdf") {
+      setFile(dropped);
+    } else {
+      toast.error("Please drop a valid PDF file");
+    }
+  };
+
+  const startAnalysis = async () => {
+    if (!file) return;
+    
+    try {
+      setStage("extracting");
+      setOcrActive(false);
+      
+      const pdfText = await pdfService.extractTextFromPDF(file, (msg) => {
+        console.log('[extraction-model]', msg);
+        if (msg.toLowerCase().includes('ocr')) setOcrActive(true);
+      });
+
+      if (!pdfText.trim()) {
+        throw new Error("No readable text found in PDF. Ensure it is a valid PDF.");
+      }
+
+      setStage("analysing");
+      
+      // Analyze with Local AI
+      const learned = await learnBlueprintFromPaper(pdfText);
+      
+      setModelName(`${learned.name || "Learned School"} Model`);
+      setSchoolName(learned.schoolName || "");
+      setDuration(learned.duration || "120");
+      setStyle(learned.institutionStyle || 'standard');
+      setSections(learned.sections || []);
+      setCustomInstructions(learned.customInstructions || "");
+      
+      setStage("review");
+      toast.success("AI successfully extracted question paper model!");
+    } catch (err: any) {
+      toast.error(err.message || "Failed to analyze paper pattern.");
+      setStage("upload");
+    }
+  };
+
+  const handleSaveAndApply = () => {
+    if (!modelName.trim()) {
+      toast.error("Please provide a template name");
+      return;
+    }
+    
+    const parsedModel = {
+      name: modelName.trim(),
+      duration,
+      institutionStyle: style,
+      sections,
+      customInstructions: customInstructions.trim() || undefined,
+      schoolName: schoolName.trim() || undefined
+    };
+
+    onApply(parsedModel);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center"
+      style={{ background: "rgba(0,0,0,0.55)", backdropFilter: "blur(4px)" }}>
+      <div className="fm-glass rounded-2xl p-6 w-full max-w-xl shadow-2xl space-y-4 mx-4 max-h-[85vh] flex flex-col overflow-hidden">
+        
+        {/* Header */}
+        <div className="flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-2">
+            <Sparkles className="w-5 h-5 text-[#94B49C]" />
+            <h3 className="text-base font-bold text-[#D5E2D6]" style={{ fontFamily: "'Playfair Display',serif" }}>
+              AI Question Paper Model Extractor
+            </h3>
+          </div>
+          <button onClick={onClose} className="text-[#527D6F] hover:text-[#94B49C]">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        {/* Content */}
+        <div className="flex-1 overflow-y-auto pr-1 space-y-4 text-sm text-[#D5E2D6]">
+          
+          {/* UPLOAD STAGE */}
+          {stage === "upload" && (
+            <div className="space-y-4">
+              <p className="text-xs text-[#94B49C]">
+                Upload a past exam paper PDF (from any school or board). The local AI will extract its exact section structures, question counts, marks, difficulty, and school-specific styling guidelines to save as a reusable template.
+              </p>
+
+              {!lmEnabled && (
+                <div className="flex items-start gap-3 px-4 py-3 rounded-xl"
+                  style={{ background: "rgba(192,80,74,0.08)", border: "1px solid rgba(192,80,74,0.25)" }}>
+                  <AlertTriangle className="w-4 h-4 text-[#c0504a] shrink-0 mt-0.5" />
+                  <div className="text-xs text-[#c0504a]">
+                    <p className="font-semibold">Local AI Required</p>
+                    <p className="mt-0.5 opacity-80">
+                      You must enable LM Studio in <a href="/settings" className="underline">Settings</a> to analyze and learn structures from past papers.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {lmEnabled && (
+                <>
+                  <div
+                    onDragEnter={handleDrag}
+                    onDragOver={handleDrag}
+                    onDragLeave={handleDrag}
+                    onDrop={handleDrop}
+                    className={`border-2 border-dashed rounded-2xl p-7 flex flex-col items-center justify-center
+                      transition-all duration-200 cursor-pointer ${
+                        isDragging
+                          ? "border-[#527D6F] bg-[rgba(82,125,111,0.08)]"
+                          : "border-[rgba(148,180,156,0.2)] hover:border-[rgba(148,180,156,0.35)]"
+                      }`}
+                  >
+                    <input
+                      type="file"
+                      id="past-paper-file"
+                      accept="application/pdf"
+                      onChange={(e) => setFile(e.target.files?.[0] || null)}
+                      className="hidden"
+                    />
+                    <label htmlFor="past-paper-file" className="cursor-pointer flex flex-col items-center text-center">
+                      <UploadCloud className="w-10 h-10 text-[#94B49C] mb-3 opacity-80" />
+                      <span className="text-sm font-semibold text-[#D5E2D6] block mb-1">
+                        {file ? file.name : "Drag & drop past paper PDF here"}
+                      </span>
+                      <span className="text-xs text-[#94B49C]">
+                        {file ? `${(file.size / (1024 * 1024)).toFixed(2)} MB` : "or click to browse computer"}
+                      </span>
+                    </label>
+                  </div>
+
+                  <div className="flex gap-2 justify-end pt-2">
+                    <button onClick={onClose}
+                      className="px-4 py-2 rounded-xl text-sm font-medium text-[#94B49C] hover:bg-[rgba(82,125,111,0.1)] transition-all">
+                      Cancel
+                    </button>
+                    <button
+                      disabled={!file}
+                      onClick={startAnalysis}
+                      className="fm-btn-primary flex items-center gap-1.5 px-5 py-2 rounded-xl text-sm font-semibold
+                        disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      <Wand2 className="w-4 h-4" /> Extract Layout
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* EXTRACTING STAGE */}
+          {stage === "extracting" && (
+            <div className="flex flex-col items-center justify-center py-10 space-y-4 text-center">
+              <div className="fm-spinner w-8 h-8 rounded-full border-2 border-t-transparent border-[#527D6F] animate-spin" />
+              <div className="space-y-1">
+                <p className="font-semibold text-base text-[#D5E2D6]">Extracting paper text...</p>
+                <p className="text-xs text-[#94B49C]">Converting digital pages to text lines.</p>
+                {ocrActive && (
+                  <p className="text-xs text-[#b0a85d] italic font-medium pt-1">
+                    ⚠️ Scanned image detected — activating OCR pipeline...
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* ANALYSING STAGE */}
+          {stage === "analysing" && (
+            <div className="flex flex-col items-center justify-center py-10 space-y-4 text-center">
+              <div className="relative">
+                <div className="fm-spinner w-10 h-10 rounded-full border-2 border-t-transparent border-[#94B49C] animate-spin" />
+                <Cpu className="w-5 h-5 text-[#94B49C] absolute inset-0 m-auto animate-pulse" />
+              </div>
+              <div className="space-y-1">
+                <p className="font-semibold text-base text-[#D5E2D6]">AI is learning paper pattern...</p>
+                <p className="text-xs text-[#94B49C] max-w-sm">
+                  Analyzing document structures, extracting sections, counting questions, and capturing school-specific styling guidelines.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* REVIEW STAGE */}
+          {stage === "review" && (
+            <div className="space-y-4 fm-fadein">
+              <p className="text-xs text-[#94B49C]">
+                Review the blueprint and rules successfully extracted by the AI. You can edit any details before saving it as a persistent model.
+              </p>
+
+              {/* Editable Fields */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <Label className="text-xs text-[#94B49C] mb-1 block uppercase font-bold tracking-wider">Model / Template Name</Label>
+                  <input
+                    value={modelName}
+                    onChange={(e) => setModelName(e.target.value)}
+                    className="fm-input w-full h-9 rounded-lg px-3 text-sm"
+                    placeholder="e.g. DAV Chemistry Midterm Model"
+                  />
+                </div>
+                <div>
+                  <Label className="text-xs text-[#94B49C] mb-1 block uppercase font-bold tracking-wider">School / Institution Name</Label>
+                  <input
+                    value={schoolName}
+                    onChange={(e) => setSchoolName(e.target.value)}
+                    className="fm-input w-full h-9 rounded-lg px-3 text-sm"
+                    placeholder="e.g. DAV Public School, Chennai"
+                  />
+                </div>
+                <div>
+                  <Label className="text-xs text-[#94B49C] mb-1 block uppercase font-bold tracking-wider">Exam Board / Affiliation Style</Label>
+                  <select
+                    value={style}
+                    onChange={(e) => setStyle(e.target.value as any)}
+                    className="fm-select w-full h-9 text-sm"
+                  >
+                    <option value="standard">Standard Style</option>
+                    <option value="cbse">CBSE Board Exam</option>
+                    <option value="tn_matric">Tamil Nadu Matriculation</option>
+                  </select>
+                </div>
+                <div>
+                  <Label className="text-xs text-[#94B49C] mb-1 block uppercase font-bold tracking-wider">Duration (minutes)</Label>
+                  <input
+                    value={duration}
+                    onChange={(e) => setDuration(e.target.value)}
+                    type="number"
+                    className="fm-input w-full h-9 rounded-lg px-3 text-sm"
+                  />
+                </div>
+              </div>
+
+              {/* Sections Table Preview */}
+              <div>
+                <Label className="text-xs text-[#94B49C] mb-1.5 block uppercase font-bold tracking-wider">Extracted Sections</Label>
+                <div className="border border-[rgba(148,180,156,0.15)] rounded-xl overflow-hidden text-xs bg-[rgba(82,125,111,0.03)]">
+                  <div className="grid grid-cols-4 gap-2 p-2 border-b border-[rgba(148,180,156,0.15)] bg-[rgba(82,125,111,0.06)] font-semibold text-[#94B49C]">
+                    <span>Name</span>
+                    <span>Type</span>
+                    <span>Q Count</span>
+                    <span>Marks/Q</span>
+                  </div>
+                  <div className="max-h-[120px] overflow-y-auto divide-y divide-[rgba(148,180,156,0.1)]">
+                    {sections.map((s, i) => (
+                      <div key={i} className="grid grid-cols-4 gap-2 p-2 text-[#D5E2D6] items-center">
+                        <span className="font-medium truncate">{s.name}</span>
+                        <span className="truncate opacity-80">{s.type}</span>
+                        <span>{s.count} Qs</span>
+                        <span>{s.marks} M</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Style Rules Learned */}
+              <div>
+                <Label className="text-xs text-[#94B49C] mb-1 block uppercase font-bold tracking-wider">Synthesized School Style Rules</Label>
+                <textarea
+                  value={customInstructions}
+                  onChange={(e) => setCustomInstructions(e.target.value)}
+                  rows={3}
+                  className="fm-textarea w-full rounded-xl p-3 text-xs"
+                  placeholder="e.g. Focuses on statement questions, Newton laws, direct derivations..."
+                />
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex gap-2 justify-end pt-2">
+                <button
+                  onClick={() => setStage("upload")}
+                  className="px-4 py-2 rounded-xl text-sm font-medium text-[#94B49C] hover:bg-[rgba(82,125,111,0.1)] transition-all"
+                >
+                  Back
+                </button>
+                <button
+                  onClick={handleSaveAndApply}
+                  className="fm-btn-primary flex items-center gap-1.5 px-5 py-2 rounded-xl text-sm font-semibold"
+                >
+                  <CheckCircle2 className="w-4 h-4" /> Apply & Save Model
+                </button>
+              </div>
+            </div>
+          )}
+
         </div>
       </div>
     </div>
@@ -206,9 +540,39 @@ function TemplatePicker({
 // ── Main Generate page ──
 export function Generate() {
   const navigate = useNavigate();
+  const location = useLocation();
+
+  useEffect(() => {
+    if (location.state?.applyTemplateId) {
+      const all = getTemplates();
+      const match = all.find(t => t.id === location.state.applyTemplateId);
+      if (match) {
+        setSections(match.sections.map((s, i) => ({
+          id:         `learned-${Date.now()}-${i}`,
+          name:       s.name,
+          type:       s.type,
+          count:      s.count,
+          marks:      s.marks,
+          difficulty: s.difficulty || 'Mixed',
+        })));
+        setDuration(match.duration);
+        setCustomInstructions(match.customInstructions || "");
+        setSchoolName(match.schoolName || "");
+        if (match.institutionStyle) {
+          setInstitutionStyle(match.institutionStyle);
+        }
+        
+        // Clean navigation state
+        navigate(location.pathname, { replace: true, state: {} });
+        toast.success(`Question Paper Model "${match.name}" applied!`);
+      }
+    }
+  }, [location.state, navigate]);
+
   const [step, setStep]           = useState(1);
   const [generationMode, setGenerationMode] = useState<"pdf" | "prompt">("pdf");
   const [customPrompt, setCustomPrompt] = useState("");
+  const [institutionStyle, setInstitutionStyle] = useState<'cbse' | 'tn_matric' | 'standard'>('standard');
   const [file, setFile]           = useState<File | null>(null);
   const [preloadedSource, setPreloadedSource] = useState<SourceMaterial | null>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -232,6 +596,9 @@ export function Generate() {
   // Template UI state
   const [showPicker, setShowPicker]     = useState(false);
   const [showSaveModal, setShowSaveModal] = useState(false);
+  const [showLearnModal, setShowLearnModal] = useState(false);
+  const [customInstructions, setCustomInstructions] = useState("");
+  const [schoolName, setSchoolName] = useState("");
 
   // Chapter selection state
   const [selectedChapters, setSelectedChapters] = useState<number[]>([]);
@@ -395,8 +762,8 @@ export function Generate() {
     setSections(s => s.map(x => x.id === id ? { ...x, [field]: value } : x));
 
   // ── Apply template ──
-  const applyTemplate = (tpl: Pick<PaperTemplate, 'sections' | 'duration'>) => {
-    setSections(tpl.sections.map((s, i) => ({
+  const applyTemplate = (tpl: any) => {
+    setSections(tpl.sections.map((s: any, i: number) => ({
       id:         `tpl-${Date.now()}-${i}`,
       name:       s.name,
       type:       s.type,
@@ -405,12 +772,29 @@ export function Generate() {
       difficulty: s.difficulty,
     })));
     setDuration(tpl.duration);
-    toast.success("Template applied!");
+    
+    setCustomInstructions(tpl.customInstructions || "");
+    setSchoolName(tpl.schoolName || "");
+
+    if (tpl.institutionStyle) {
+      setInstitutionStyle(tpl.institutionStyle);
+      const styleLabel = tpl.institutionStyle === 'cbse' ? 'CBSE' : tpl.institutionStyle === 'tn_matric' ? 'TN Matriculation' : 'Standard';
+      toast.success(`Template applied! Board style set to ${styleLabel}.`);
+    } else if (tpl.name && tpl.name.includes("CBSE")) {
+      setInstitutionStyle("cbse");
+      toast.success("Template applied! Board style set to CBSE.");
+    } else if (tpl.name && (tpl.name.includes("Tamil Nadu") || tpl.name.includes("TN "))) {
+      setInstitutionStyle("tn_matric");
+      toast.success("Template applied! Board style set to TN Matriculation.");
+    } else {
+      setInstitutionStyle("standard");
+      toast.success("Template applied!");
+    }
   };
 
   // ── Save current as template ──
   const handleSaveTemplate = (name: string) => {
-    const tpl = createTemplate(name, duration, sections);
+    const tpl = createTemplate(name, duration, sections, institutionStyle, customInstructions, schoolName);
     saveTemplate(tpl);
     setShowSaveModal(false);
     toast.success(`Template "${name}" saved!`);
@@ -465,7 +849,10 @@ export function Generate() {
         `${duration} Minutes`,
         fileName,
         academicLevel,
-        isPromptMode
+        isPromptMode,
+        institutionStyle,
+        customInstructions,
+        schoolName
       );
 
       setStage("done");
@@ -496,6 +883,28 @@ export function Generate() {
       {/* Modals */}
       {showPicker    && <TemplatePicker  onApply={applyTemplate} onClose={() => setShowPicker(false)} />}
       {showSaveModal && <SaveTemplateModal onSave={handleSaveTemplate} onClose={() => setShowSaveModal(false)} />}
+      {showLearnModal && <LearnModelModal onApply={(model) => {
+        // Apply details to form states
+        setSections(model.sections.map((s, i) => ({
+          id:         `learned-${Date.now()}-${i}`,
+          name:       s.name,
+          type:       s.type,
+          count:      s.count,
+          marks:      s.marks,
+          difficulty: s.difficulty,
+        })));
+        setDuration(model.duration);
+        setInstitutionStyle(model.institutionStyle);
+        setCustomInstructions(model.customInstructions || "");
+        setSchoolName(model.schoolName || "");
+        
+        // Save as template
+        const tpl = createTemplate(model.name, model.duration, model.sections, model.institutionStyle, model.customInstructions, model.schoolName);
+        saveTemplate(tpl);
+        
+        setShowLearnModal(false);
+        toast.success(`School Model "${model.name}" saved & applied successfully!`);
+      }} onClose={() => setShowLearnModal(false)} />}
 
       {/* ── Step progress ── */}
       <div className="flex items-center justify-between sm:justify-start gap-3 mb-8 sm:mb-10 w-full overflow-x-auto pb-1.5 scrollbar-none shrink-0">
@@ -837,11 +1246,20 @@ export function Generate() {
                 >
                   <Save className="w-3.5 h-3.5" /> Save Template
                 </button>
+                <button
+                  onClick={() => setShowLearnModal(true)}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-[#D5E2D6]
+                    hover:bg-[rgba(82,125,111,0.22)] transition-all bg-[rgba(148,180,156,0.1)]"
+                  style={{ border: "1px solid rgba(148,180,156,0.3)" }}
+                  title="Upload a past paper PDF and let the AI learn its structure and style"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-[#94B49C]" /> AI Learn Model
+                </button>
               </div>
             </div>
 
             {/* Metadata */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pb-6"
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 pb-6"
               style={{ borderBottom: "1px solid rgba(148,180,156,0.12)" }}>
               {[
                 { label: "Paper Title",    value: paperTitle, set: setPaperTitle, placeholder: "Mid-Term Exam"  },
@@ -863,6 +1281,14 @@ export function Generate() {
                   <option>High School</option>
                   <option>Undergraduate (College)</option>
                   <option>Graduate / Professional</option>
+                </select>
+              </div>
+              <div>
+                <Label className="text-xs font-semibold text-[#94B49C] mb-1.5 block tracking-wide uppercase">Exam Board / Style</Label>
+                <select value={institutionStyle} onChange={e => setInstitutionStyle(e.target.value as any)} className="fm-select w-full h-9">
+                  <option value="standard">Standard Style</option>
+                  <option value="cbse">CBSE Board</option>
+                  <option value="tn_matric">Tamil Nadu Matriculation</option>
                 </select>
               </div>
             </div>
