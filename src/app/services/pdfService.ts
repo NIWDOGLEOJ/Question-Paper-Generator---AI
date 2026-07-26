@@ -1,6 +1,6 @@
 // PDF text extraction using pdfjs-dist + Tesseract.js OCR fallback
 import * as pdfjsLib from 'pdfjs-dist';
-import { getLMStudioConfig, generateQuestionsWithLLM } from './lmStudioService';
+import { getLMStudioConfig, generateQuestionsWithLLM, generateFullPaperWithLLM } from './lmStudioService';
 import { cleanStemText } from './stemTextCleaner';
 import { dbPut, dbDelete } from './db';
 
@@ -459,37 +459,56 @@ export async function generateQuestions(
   const stemProblems = analysis?.stemProblems ?? [];
  
   let finalSections: PaperSection[] = [];
- 
-  for (let sIdx = 0; sIdx < sections.length; sIdx++) {
-    const section = sections[sIdx];
-    let questions: Question[];
- 
-    if (isPromptMode && !useLLM) {
+
+  if (isPromptMode) {
+    if (!useLLM) {
       throw new Error(
         "Local AI (LM Studio) must be enabled in Settings to generate a paper from custom prompts."
       );
     }
- 
-    if (useLLM) {
-      try {
-        questions = await generateQuestionsWithLLM(
-          cleanedText, section, sIdx, subject, subjectType,
-          stemProblems, academicLevel, isPromptMode, institutionStyle,
-          customInstructions
-        );
-      } catch (err) {
-        // DO NOT silently fall back — surface the real error so the user knows LM Studio failed
-        const msg = err instanceof Error ? err.message : String(err);
-        throw new Error(
-          `LM Studio failed for "${section.name}": ${msg}. ` +
-          `Check that LM Studio is running, CORS is enabled, and a model is loaded. ` +
-          `You can disable LM Studio in Settings to use the built-in template generator instead.`
-        );
-      }
-    } else {
-      questions = templateQuestions(section, sIdx, keywords, topics, concepts, sentences, definitions, facts, subject, subjectType, academicLevel);
+    try {
+      finalSections = await generateFullPaperWithLLM(
+        cleanedText,
+        sections,
+        subject,
+        subjectType,
+        academicLevel,
+        institutionStyle,
+        customInstructions
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new Error(
+        `LM Studio failed during custom prompt paper generation: ${msg}. ` +
+        `Check that LM Studio is running, CORS is enabled, and a model is loaded.`
+      );
     }
-    finalSections.push({ name: section.name, instructions: getInstructions(section), type: section.type, questions });
+  } else {
+    for (let sIdx = 0; sIdx < sections.length; sIdx++) {
+      const section = sections[sIdx];
+      let questions: Question[];
+
+      if (useLLM) {
+        try {
+          questions = await generateQuestionsWithLLM(
+            cleanedText, section, sIdx, subject, subjectType,
+            stemProblems, academicLevel, isPromptMode, institutionStyle,
+            customInstructions
+          );
+        } catch (err) {
+          // DO NOT silently fall back — surface the real error so the user knows LM Studio failed
+          const msg = err instanceof Error ? err.message : String(err);
+          throw new Error(
+            `LM Studio failed for "${section.name}": ${msg}. ` +
+            `Check that LM Studio is running, CORS is enabled, and a model is loaded. ` +
+            `You can disable LM Studio in Settings to use the built-in template generator instead.`
+          );
+        }
+      } else {
+        questions = templateQuestions(section, sIdx, keywords, topics, concepts, sentences, definitions, facts, subject, subjectType, academicLevel);
+      }
+      finalSections.push({ name: section.name, instructions: getInstructions(section), type: section.type, questions });
+    }
   }
  
   console.log(`generateQuestions [${subjectType}]: ${((performance.now() - t0) / 1000).toFixed(2)}s`);

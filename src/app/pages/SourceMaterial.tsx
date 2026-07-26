@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import * as pdfService from "../services/pdfService";
+import { extractTextFromFile } from "../services/fileExtractionService";
 import * as sourceService from "../services/sourceService";
 import type { SourceMaterial } from "../services/sourceService";
 
@@ -79,9 +80,9 @@ function DropZone({ onFile }: { onFile: (f: File) => void }) {
         text-center cursor-pointer transition-all ${dragging ? "active" : ""}`}
     >
       <UploadCloud className="w-12 h-12 text-[#527D6F] mb-4 fm-float" />
-      <p className="text-sm font-semibold text-[#D5E2D6] mb-1">Drop a PDF here to add to your library</p>
-      <p className="text-xs text-[#527D6F]">or click to browse · up to 50 MB</p>
-      <input id="src-file-input" type="file" accept=".pdf" className="sr-only"
+      <p className="text-sm font-semibold text-[#D5E2D6] mb-1">Drop any document or image textbook here</p>
+      <p className="text-xs text-[#527D6F]">Supports PDF, Word, PowerPoint, Markdown, plain text, and major image formats</p>
+      <input id="src-file-input" type="file" accept=".pdf,.docx,.pptx,.txt,.md,.png,.jpg,.jpeg,.webp" className="sr-only"
         onChange={e => { if (e.target.files?.[0]) accept(e.target.files[0]); e.target.value = ""; }} />
     </div>
   );
@@ -97,7 +98,7 @@ function ProcessingBanner({ fileName }: { fileName: string }) {
       </div>
       <div className="flex-1 min-w-0">
         <p className="text-sm font-semibold text-[#D5E2D6] truncate">{fileName}</p>
-        <p className="text-xs text-[#94B49C] mt-0.5">Extracting text… this may take a moment</p>
+        <p className="text-xs text-[#94B49C] mt-0.5">Extracting document contents… this may take a moment</p>
         <div className="mt-2 h-1 rounded-full overflow-hidden" style={{ background: "rgba(148,180,156,0.15)" }}>
           <div className="h-full rounded-full fm-shimmer w-2/3" />
         </div>
@@ -138,13 +139,13 @@ export function SourceMaterialPage() {
     setProcessing(file.name);
     try {
       let pageCount = 0;
-      const text = await pdfService.extractTextFromPDF(file, (msg) => {
+      const text = await extractTextFromFile(file, (msg) => {
         // Try to extract page count from extraction messages
         const m = msg.match(/(\d+)\s+page/i);
         if (m) pageCount = parseInt(m[1]);
       });
       
-      const baseTitle = file.name.replace(/\.pdf$/i, '').replace(/[-_]+/g, ' ').replace(/\b\w/g, c => c.toUpperCase()).trim();
+      const baseTitle = file.name.replace(/\.(pdf|docx|pptx|txt|md|png|jpg|jpeg|webp)$/i, '').replace(/[-_]+/g, ' ').replace(/\b\w/g, c => c.toUpperCase()).trim();
       const chapters = pdfService.splitTextIntoChapters(text, baseTitle);
 
       const src = sourceService.createSource(file, text, pageCount, chapters.length > 1 ? chapters : undefined);
@@ -152,9 +153,9 @@ export function SourceMaterialPage() {
       toast.success(`"${src.title}" added to your library!`);
       
       load();
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      toast.error("Failed to process PDF. Please try again.");
+      toast.error(err.message || "Failed to process document. Please try again.");
     } finally {
       setProcessing(null);
     }

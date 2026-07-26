@@ -1,4 +1,4 @@
-import { Section, Question, SubjectType } from './pdfService';
+import { Section, Question, SubjectType, PaperSection } from './pdfService';
 
 // ── Subject-specific prompt additions for STEM ───────────────────────────
 const STEM_PROMPT: Record<Exclude<SubjectType,'general'>, string> = {
@@ -752,4 +752,208 @@ JSON Response:`;
       "and loaded with a capable model that outputs clean JSON."
     );
   }
+}
+
+// ── Generate the entire question paper in a single call (allows custom prompt structural override/rejection) ──
+export async function generateFullPaperWithLLM(
+  promptText: string,
+  suggestedSections: Section[],
+  subject: string,
+  subjectType: SubjectType,
+  academicLevel: string,
+  institutionStyle: 'cbse' | 'tn_matric' | 'standard' = 'standard',
+  customInstructions?: string
+): Promise<PaperSection[]> {
+  const config = getLMStudioConfig();
+  if (!config.enabled) throw new Error('LM Studio is not enabled');
+  if (!config.model)   throw new Error('No model selected. Please pick a model in LM Studio Settings.');
+
+  let boardBlock = '';
+  if (institutionStyle === 'cbse') {
+    boardBlock = '\n\nCBSE STYLE REQUIREMENTS:\n- Renders a Professional Roll Number Grid.\n- Renders CBSE formatted instructions.\n- Allows CBSE Assertion-Reasoning Multiple Choice Questions.';
+  } else if (institutionStyle === 'tn_matric') {
+    boardBlock = '\n\nTAMIL NADU MATRICULATION STYLE REQUIREMENTS:\n- Renders "GOVERNMENT OF TAMIL NADU" school education headers.\n- Splitting sections into centered UPPERCASE parts (e.g. PART - I, PART - II).\n- Questions should ask direct textbook facts, definitions, and standard derivation rules.';
+  }
+
+  if (customInstructions) {
+    boardBlock += `\n\nCUSTOM SCHOOL STYLE INSTRUCTIONS:\n- You MUST strictly mimic the following school-specific questioning style, structures, and guidelines: ${customInstructions}`;
+  }
+
+  const prompt = `You are an expert ${subject} test-setter creating a complete exam question paper for a ${academicLevel} class.
+Your task is to generate a complete, beautifully structured exam question paper based strictly on the following custom prompt:
+
+CUSTOM GENERATION PROMPT:
+"""
+${promptText}
+"""
+
+INSTRUCTIONS REGARDING THE STRUCTURE:
+1. Dynamic Structure: You MUST follow the custom prompt's instructions exactly. Generate exactly the sections, types of questions, total marks, and structure specified in the "CUSTOM GENERATION PROMPT".
+2. Default Layout Design: If the custom prompt is simple and does not specify a clear structural layout (e.g., it is just a topic name like "Newton's laws of motion" or "photosynthesis"), design a natural, well-balanced set of exam sections that best fits the requested topic for a ${academicLevel} class. Do NOT feel constrained by any default template patterns.
+3. Class Calibration: Make sure all questions are accurately calibrated for the ${academicLevel} level.${boardBlock}
+
+OUTPUT FORMAT RULES (CRITICAL):
+You MUST format each section you generate using this exact header syntax so our parser can split and read it. Do NOT include markdown code block wrappers (like \`\`\`json or \`\`\`markdown) around the paper text:
+
+[SECTION] Section Name
+Type: [MCQ / Short Answer / Long Answer / Fill in the Blanks / True or False]
+Marks: [number of marks per question in this section]
+Instructions: [Brief section-level instructions]
+
+After the section header block, list the questions for that section sequentially (1., 2., 3., etc.).
+- For MCQ: write exactly 4 options (A) B) C) D)) followed by "Answer: [Letter only]".
+- For other types: write the question text followed by "Answer: [Model Answer/Points]".
+- Do NOT add markdown code block wrappers around the paper.
+- Output ONLY the formatted question paper text. No conversational introductions or conclusions.
+
+Begin generating the question paper immediately:`;
+
+  console.log(`[LLM] Generating full question paper from custom prompt. promptTextLength=${promptText.length}`);
+  const raw = await callLLM(prompt, config);
+  
+  console.log(`[LLM] Full question paper response generated. rawLength=${raw.length}`);
+  const cleanRaw = cleanLLMMath(raw);
+  
+  return parseWholePaperResponse(cleanRaw, suggestedSections);
+}
+
+// ── Parse a single-pass whole paper response containing [SECTION] markers ──
+export function parseWholePaperResponse(rawText: string, suggestedSections: Section[]): PaperSection[] {
+  const sectionBlocks = rawText.split(/\[SECTION\]/i);
+  const parsedSections: PaperSection[] = [];
+  
+  for (let i = 1; i < sectionBlocks.length; i++) {
+    const block = sectionBlocks[i].trim();
+    if (!block) continue;
+    
+    const lines = block.split('\n');
+    let name = `Section ${String.fromCharCode(65 + parsedSections.length)}`;
+    let type = 'Short Answer';
+    let marks = 2;
+    let instructions = '';
+    
+    if (lines[0]) {
+      name = lines[0].trim();
+    }
+    
+    let metadataEndIdx = 0;
+    for (let j = 1; j < Math.min(lines.length, 6); j++) {
+      const line = lines[j].trim();
+      const typeMatch = line.match(/^Type:\s*(.+)$/i);
+      const marksMatch = line.match(/^Marks:\s*(\d+)$/i);
+      const instMatch = line.match(/^Instructions:\s*(.+)$/i);
+      
+      if (typeMatch) {
+        type = typeMatch[1].trim();
+        metadataEndIdx = j;
+      } else if (marksMatch) {
+        marks = parseInt(marksMatch[1].trim(), 10);
+        metadataEndIdx = j;
+      } else if (instMatch) {
+        instructions = instMatch[1].trim();
+        metadataEndIdx = j;
+      }
+    }
+    
+    const questionsBlockText = lines.slice(metadataEndIdx + 1).join('\n');
+    
+    const dummySection = {
+      id: `sec-${Date.now()}-${i}`,
+      name,
+      type,
+      count: 100, // extract all generated questions
+      marks,
+      difficulty: 'Medium'
+    };
+    
+    const questions = parseQuestions(questionsBlockText, dummySection, i);
+    
+    if (questions.length > 0) {
+      parsedSections.push({
+        name,
+        instructions: instructions || getInstructionsLocal({ name, type, marks }),
+        type,
+        questions
+      });
+    }
+  }
+  
+  // Fallback 1: Split by markdown headers
+  if (parsedSections.length === 0) {
+    console.warn("[Parser] No [SECTION] tags found, attempting fallback splitting by markdown headers.");
+    const markdownBlocks = rawText.split(/(?:^|\n)(?:\#\#+\s*|\bSection\b\s*:?\s*|\bPART\b\s*:?\s*)([A-Z0-9\-\s\:\(\)\{\}\[\]\|\,\.]+)(?=\n|$)/i);
+    
+    if (markdownBlocks.length > 1) {
+      for (let i = 1; i < markdownBlocks.length; i += 2) {
+        const sectionName = markdownBlocks[i].trim();
+        const blockContent = markdownBlocks[i + 1] || '';
+        
+        const matchedSuggested = suggestedSections.find(s => s.name.toLowerCase().includes(sectionName.toLowerCase()) || sectionName.toLowerCase().includes(s.name.toLowerCase()));
+        
+        const dummySection = {
+          id: `sec-md-${Date.now()}-${i}`,
+          name: sectionName,
+          type: matchedSuggested?.type || 'Short Answer',
+          count: matchedSuggested?.count || 50,
+          marks: matchedSuggested?.marks || 2,
+          difficulty: 'Medium'
+        };
+        
+        const questions = parseQuestions(blockContent, dummySection, Math.floor(i / 2) + 1);
+        if (questions.length > 0) {
+          parsedSections.push({
+            name: sectionName,
+            instructions: matchedSuggested ? getInstructionsLocal(matchedSuggested) : `Answer all questions from this section.`,
+            type: dummySection.type,
+            questions
+          });
+        }
+      }
+    }
+  }
+  
+  // Fallback 2: Put everything into a single generic section
+  if (parsedSections.length === 0) {
+    console.warn("[Parser] Ultimate fallback: putting all parsed questions into a single section.");
+    const dummySection = {
+      id: `sec-flat-${Date.now()}`,
+      name: 'Questions',
+      type: suggestedSections[0]?.type || 'Short Answer',
+      count: 100,
+      marks: suggestedSections[0]?.marks || 2,
+      difficulty: 'Medium'
+    };
+    
+    const questions = parseQuestions(rawText, dummySection, 1);
+    if (questions.length > 0) {
+      parsedSections.push({
+        name: 'Questions',
+        instructions: 'Answer the following questions.',
+        type: dummySection.type,
+        questions
+      });
+    }
+  }
+  
+  return parsedSections;
+}
+
+function getInstructionsLocal(s: { type: string; marks: number; name?: string }): string {
+  const typeLC = s.type.toLowerCase();
+  if (typeLC.includes('multiple choice') || typeLC.includes('mcq')) {
+    return "Choose the correct option for each of the following questions.";
+  }
+  if (typeLC.includes('true') || typeLC.includes('false')) {
+    return "State whether the following statements are True or False.";
+  }
+  if (typeLC.includes('fill')) {
+    return "Fill in the blanks with appropriate words.";
+  }
+  if (typeLC.includes('short')) {
+    return `Answer all questions in 2-3 sentences. Each question carries ${s.marks} marks.`;
+  }
+  if (typeLC.includes('essay') || typeLC.includes('long')) {
+    return `Answer all questions in detail. Each question carries ${s.marks} marks.`;
+  }
+  return `Answer the following questions. Each question carries ${s.marks} marks.`;
 }

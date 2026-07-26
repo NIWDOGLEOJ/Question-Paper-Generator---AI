@@ -3,6 +3,7 @@ import { Link } from "react-router";
 import {
   FileText, Plus, Calendar, Clock, BookOpen,
   Trash2, Sparkles, AlertTriangle, Tag, X, Search,
+  Minimize2, Maximize2,
 } from "lucide-react";
 import * as pdfService from "../services/pdfService";
 import { toast } from "sonner";
@@ -138,6 +139,17 @@ export function Dashboard() {
   const [editingTagsId, setEditingTagsId]     = useState<string | null>(null);
   const [activeTagFilter, setActiveTagFilter] = useState<string | null>(null);
   const [searchQuery, setSearchQuery]           = useState('');
+  const [isCompact, setIsCompact] = useState(() => {
+    return localStorage.getItem("evalix_dash_compact") === "true";
+  });
+
+  const toggleCompact = () => {
+    setIsCompact(prev => {
+      const next = !prev;
+      localStorage.setItem("evalix_dash_compact", String(next));
+      return next;
+    });
+  };
 
   useEffect(() => { loadPapers(); }, []);
 
@@ -205,43 +217,81 @@ export function Dashboard() {
     <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8 sm:py-10 fm-fadein">
 
       {/* ── Header row ── */}
-      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-8 sm:mb-10">
+      <div className={`flex flex-col sm:flex-row sm:items-end justify-between gap-4 ${isCompact ? "mb-4" : "mb-8 sm:mb-10"}`}>
         <div>
-          <p className="text-xs font-semibold tracking-widest text-[#527D6F] uppercase mb-1">
-            Your workspace
-          </p>
-          <h1 className="text-2xl sm:text-3xl font-bold text-[#D5E2D6]"
+          {!isCompact && (
+            <p className="text-xs font-semibold tracking-widest text-[#527D6F] uppercase mb-1">
+              Your workspace
+            </p>
+          )}
+          <h1 className={`font-bold text-[#D5E2D6] ${isCompact ? "text-xl sm:text-2xl" : "text-2xl sm:text-3xl"}`}
             style={{ fontFamily: "'Playfair Display', serif" }}>
             Question Papers
           </h1>
-          <p className="mt-1 text-sm text-[#94B49C]">
-            Manage and preview your AI-generated papers.
-          </p>
+          {!isCompact && (
+            <p className="mt-1 text-sm text-[#94B49C]">
+              Manage and preview your AI-generated papers.
+            </p>
+          )}
         </div>
-        <Link
-          to="/new"
-          className="fm-btn-primary flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold shadow-lg shrink-0 self-start sm:self-auto"
-        >
-          <Plus className="w-4 h-4" /> New Paper
-        </Link>
+        <div className="flex items-center gap-2 self-start sm:self-auto shrink-0 w-full sm:w-auto justify-between sm:justify-end">
+          <button
+            onClick={toggleCompact}
+            title={isCompact ? "Switch to spacious layout" : "Switch to compact layout"}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-[#94B49C]
+              hover:bg-[rgba(82,125,111,0.12)] transition-all bg-[rgba(82,125,111,0.05)] border border-[rgba(148,180,156,0.2)]"
+          >
+            {isCompact ? (
+              <>
+                <Maximize2 className="w-3.5 h-3.5" /> Spacious View
+              </>
+            ) : (
+              <>
+                <Minimize2 className="w-3.5 h-3.5" /> Compact View
+              </>
+            )}
+          </button>
+          <Link
+            to="/new"
+            className="fm-btn-primary flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold shadow-lg shrink-0"
+          >
+            <Plus className="w-4 h-4" /> New Paper
+          </Link>
+        </div>
       </div>
 
       {/* ── Stats strip ── */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6 sm:mb-8">
-        {[
-          { label: "Total Papers",   value: papers.length },
-          { label: "Total Sections", value: papers.reduce((a, p) => a + p.sections.length, 0) },
-          { label: "Total Marks",    value: papers.reduce((a, p) => a + p.totalMarks, 0) },
-        ].map((stat, i) => (
-          <div key={i} className="fm-glass p-5 rounded-xl" style={{ animationDelay: `${i * 80}ms` }}>
-            <p className="text-2xl font-bold text-[#94B49C]">{stat.value}</p>
-            <p className="text-xs text-[#527D6F] mt-1 font-medium">{stat.label}</p>
-          </div>
-        ))}
-      </div>
+      {isCompact ? (
+        <div className="flex flex-wrap gap-x-5 gap-y-2 text-xs font-semibold text-[#94B49C] mb-4 bg-[rgba(82,125,111,0.06)] px-4 py-2.5 rounded-xl border border-[rgba(148,180,156,0.08)]">
+          <span className="flex items-center gap-1.5">
+            Total Papers: <strong className="text-[#D5E2D6]">{papers.length}</strong>
+          </span>
+          <span className="text-[rgba(148,180,156,0.15)]">|</span>
+          <span className="flex items-center gap-1.5">
+            Total Sections: <strong className="text-[#D5E2D6]">{papers.reduce((a, p) => a + p.sections.length, 0)}</strong>
+          </span>
+          <span className="text-[rgba(148,180,156,0.15)]">|</span>
+          <span className="flex items-center gap-1.5">
+            Total Marks: <strong className="text-[#D5E2D6]">{papers.reduce((a, p) => a + p.totalMarks, 0)}</strong>
+          </span>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6 sm:mb-8">
+          {[
+            { label: "Total Papers",   value: papers.length },
+            { label: "Total Sections", value: papers.reduce((a, p) => a + p.sections.length, 0) },
+            { label: "Total Marks",    value: papers.reduce((a, p) => a + p.totalMarks, 0) },
+          ].map((stat, i) => (
+            <div key={i} className="fm-glass p-5 rounded-xl" style={{ animationDelay: `${i * 80}ms` }}>
+              <p className="text-2xl font-bold text-[#94B49C]">{stat.value}</p>
+              <p className="text-xs text-[#527D6F] mt-1 font-medium">{stat.label}</p>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* ── Search bar ── */}
-      <div className="relative mb-4">
+      <div className={`relative ${isCompact ? "mb-3" : "mb-4"}`}>
         <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[#527D6F] pointer-events-none" />
         <input
           type="text"
@@ -373,16 +423,16 @@ export function Dashboard() {
                   }}
                 >
                   {/* ── Main row ── */}
-                  <div className="px-4 sm:px-6 py-4 flex flex-col sm:flex-row sm:items-start gap-4">
+                  <div className={`px-4 sm:px-6 ${isCompact ? "py-2 sm:py-2.5" : "py-4"} flex flex-col sm:flex-row sm:items-start gap-4`}>
 
                     {/* Left block containing icon + text contents */}
                     <div className="flex items-start gap-4 flex-1 min-w-0">
                       {/* Icon */}
                       <div
-                        className="w-10 h-10 rounded-lg flex items-center justify-center shrink-0 transition-colors mt-0.5"
+                        className={`${isCompact ? "w-8 h-8" : "w-10 h-10"} rounded-lg flex items-center justify-center shrink-0 transition-colors mt-0.5`}
                         style={{ background: isPending ? 'rgba(192,80,74,0.12)' : 'rgba(82,125,111,0.18)' }}
                       >
-                        <FileText className={`w-5 h-5 ${isPending ? 'text-[#c0504a]' : 'text-[#94B49C]'}`} />
+                        <FileText className={`${isCompact ? "w-4 h-4" : "w-5 h-5"} ${isPending ? 'text-[#c0504a]' : 'text-[#94B49C]'}`} />
                       </div>
 
                       {/* Content */}
@@ -398,7 +448,7 @@ export function Dashboard() {
                         )}
 
                         {/* Metadata row */}
-                        <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-[#527D6F]">
+                        <div className={`${isCompact ? "mt-0.5" : "mt-1"} flex flex-wrap items-center gap-3 text-xs text-[#527D6F]`}>
                           <span className="flex items-center gap-1">
                             <BookOpen className="h-3 w-3" /> {paper.subject}
                           </span>
@@ -414,7 +464,7 @@ export function Dashboard() {
 
                         {/* Tag chips */}
                         {hasTags && (
-                          <div className="mt-2 flex flex-wrap gap-1.5">
+                          <div className={`${isCompact ? "mt-1" : "mt-2"} flex flex-wrap gap-1.5`}>
                             {paper.tags!.map(t => (
                               <button
                                 key={t}
@@ -445,7 +495,7 @@ export function Dashboard() {
                     </div>
 
                     {/* Right-side buttons */}
-                    <div className="flex items-center justify-between sm:justify-end gap-1.5 shrink-0 mt-1 sm:mt-0.5 sm:ml-auto w-full sm:w-auto border-t sm:border-t-0 border-[rgba(148,180,156,0.08)] pt-2.5 sm:pt-0">
+                    <div className={`flex items-center justify-between sm:justify-end gap-1.5 shrink-0 sm:ml-auto w-full sm:w-auto border-t sm:border-t-0 border-[rgba(148,180,156,0.08)] ${isCompact ? "mt-0.5 pt-1.5 sm:pt-0" : "mt-1 sm:mt-0.5 pt-2.5 sm:pt-0"}`}>
                       {/* Sections badge */}
                       <span className="fm-badge">
                         {paper.sections.length}{" "}

@@ -44,6 +44,8 @@ export function Layout() {
 
   return (
     <div className="flex h-screen fm-bg overflow-hidden">
+      {/* Premium scrolling dot-grid tech pattern */}
+      <div className="fm-bg-grid" />
       <div className="pointer-events-none fixed inset-0 z-0" aria-hidden />
 
       {/* ── Mobile Sidebar Backdrop ── */}
@@ -57,17 +59,25 @@ export function Layout() {
       {/* ── Sidebar ── */}
       <aside
         className={cn(
-          "fixed inset-y-0 left-0 z-50 w-64 flex flex-col shrink-0 transition-transform duration-300 ease-in-out lg:static lg:translate-x-0 lg:z-10",
+          "fixed inset-y-0 left-0 z-50 w-64 flex flex-col shrink-0 transition-transform duration-300 ease-in-out lg:static lg:translate-x-0 lg:z-10 relative overflow-hidden",
           sidebarOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
         )}
         style={{
-          background: "rgba(25, 36, 41, 0.95)",
-          backdropFilter: "blur(16px)",
-          borderRight: "1px solid rgba(148,180,156,0.12)",
+          background: "linear-gradient(to bottom, rgba(37, 51, 56, 0.65) 0%, rgba(25, 33, 38, 0.8) 100%)",
+          backdropFilter: "blur(24px)",
+          borderRight: "1px solid rgba(148,180,156,0.15)",
         }}
       >
+        {/* Decorative subtle ambient lights specific to the sidebar */}
+        <div className="absolute inset-0 pointer-events-none overflow-hidden z-0 opacity-40">
+          <div className="absolute top-[-20%] left-[-20%] w-[140%] h-[50%] rounded-full filter blur-[50px]"
+            style={{ background: "radial-gradient(circle, rgba(148,180,156,0.18) 0%, transparent 70%)" }} />
+          <div className="absolute bottom-[-20%] right-[-20%] w-[140%] h-[50%] rounded-full filter blur-[50px]"
+            style={{ background: "radial-gradient(circle, rgba(82,125,111,0.15) 0%, transparent 70%)" }} />
+        </div>
+
         {/* Logo */}
-        <div className="h-16 flex items-center justify-between px-6 gap-3 shrink-0"
+        <div className="h-16 flex items-center justify-between px-6 gap-3 shrink-0 relative z-10"
           style={{ borderBottom: "1px solid rgba(148,180,156,0.1)" }}>
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 rounded-lg flex items-center justify-center fm-float"
@@ -76,7 +86,7 @@ export function Layout() {
             </div>
             <span className="text-base font-bold tracking-tight text-[#D5E2D6]"
               style={{ fontFamily: "'Playfair Display', serif" }}>
-              QPaper Gen
+              EVALIX
             </span>
           </div>
           <button
@@ -89,7 +99,7 @@ export function Layout() {
         </div>
 
         {/* Nav */}
-        <nav className="flex-1 px-3 py-6 space-y-1 overflow-y-auto">
+        <nav className="flex-1 px-3 py-6 space-y-1 overflow-y-auto relative z-10">
           {navItems.map((item) => {
             const isActive = item.href === "/"
               ? location.pathname === "/"
@@ -115,7 +125,7 @@ export function Layout() {
 
         {/* User — links to settings */}
         <Link to="/settings"
-          className="p-4 flex items-center gap-3 transition-colors hover:bg-[rgba(82,125,111,0.08)] shrink-0"
+          className="p-4 flex items-center gap-3 transition-colors hover:bg-[rgba(82,125,111,0.08)] shrink-0 relative z-10"
           style={{ borderTop: "1px solid rgba(148,180,156,0.1)" }}>
           <div className="h-8 w-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0"
             style={{ background: "linear-gradient(135deg,#527D6F,#94B49C)", color: "#2F3E46" }}>
@@ -154,7 +164,7 @@ export function Layout() {
                 <Sparkles className="w-3.5 h-3.5 text-[#2F3E46]" />
               </div>
               <span className="text-sm font-bold text-[#D5E2D6]" style={{ fontFamily: "'Playfair Display', serif" }}>
-                QPaper Gen
+                EVALIX
               </span>
             </div>
           </div>

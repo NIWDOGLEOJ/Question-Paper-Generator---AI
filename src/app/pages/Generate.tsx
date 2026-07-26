@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import * as pdfService from "../services/pdfService";
+import { extractTextFromFile } from "../services/fileExtractionService";
 import { getLMStudioConfig, learnBlueprintFromPaper } from "../services/lmStudioService";
 import {
   getTemplates, saveTemplate, deleteTemplate,
@@ -143,10 +144,14 @@ function LearnModelModal({
     e.preventDefault();
     setIsDragging(false);
     const dropped = e.dataTransfer.files?.[0];
-    if (dropped && dropped.type === "application/pdf") {
-      setFile(dropped);
-    } else {
-      toast.error("Please drop a valid PDF file");
+    if (dropped) {
+      const ext = dropped.name.split(".").pop()?.toLowerCase();
+      const allowed = ["pdf", "docx", "pptx", "txt", "md", "png", "jpg", "jpeg", "webp"];
+      if (ext && allowed.includes(ext)) {
+        setFile(dropped);
+      } else {
+        toast.error("Unsupported file format. Please upload .pdf, .docx, .pptx, .txt, .md, or images.");
+      }
     }
   };
 
@@ -157,13 +162,13 @@ function LearnModelModal({
       setStage("extracting");
       setOcrActive(false);
       
-      const pdfText = await pdfService.extractTextFromPDF(file, (msg) => {
+      const pdfText = await extractTextFromFile(file, (msg) => {
         console.log('[extraction-model]', msg);
         if (msg.toLowerCase().includes('ocr')) setOcrActive(true);
       });
 
       if (!pdfText.trim()) {
-        throw new Error("No readable text found in PDF. Ensure it is a valid PDF.");
+        throw new Error("No readable text found in file. Ensure the file contains text or clear handwriting/print.");
       }
 
       setStage("analysing");
@@ -229,7 +234,7 @@ function LearnModelModal({
           {stage === "upload" && (
             <div className="space-y-4">
               <p className="text-xs text-[#94B49C]">
-                Upload a past exam paper PDF (from any school or board). The local AI will extract its exact section structures, question counts, marks, difficulty, and school-specific styling guidelines to save as a reusable template.
+                Upload a past exam paper (from any school or board). Supported formats: .pdf, .docx, .pptx, .txt, .md, .png, .jpg, .jpeg, .webp. The local AI will extract its exact section structures, question counts, marks, difficulty, and school-specific styling guidelines to save as a reusable template.
               </p>
 
               {!lmEnabled && (
@@ -262,17 +267,17 @@ function LearnModelModal({
                     <input
                       type="file"
                       id="past-paper-file"
-                      accept="application/pdf"
+                      accept=".pdf,.docx,.pptx,.txt,.md,.png,.jpg,.jpeg,.webp"
                       onChange={(e) => setFile(e.target.files?.[0] || null)}
                       className="hidden"
                     />
                     <label htmlFor="past-paper-file" className="cursor-pointer flex flex-col items-center text-center">
                       <UploadCloud className="w-10 h-10 text-[#94B49C] mb-3 opacity-80" />
                       <span className="text-sm font-semibold text-[#D5E2D6] block mb-1">
-                        {file ? file.name : "Drag & drop past paper PDF here"}
+                        {file ? file.name : "Drag & drop past paper here"}
                       </span>
                       <span className="text-xs text-[#94B49C]">
-                        {file ? `${(file.size / (1024 * 1024)).toFixed(2)} MB` : "or click to browse computer"}
+                        {file ? `${(file.size / (1024 * 1024)).toFixed(2)} MB` : "or click to browse computer · supports documents and images"}
                       </span>
                     </label>
                   </div>
@@ -720,20 +725,27 @@ export function Generate() {
 
   // ── File helpers ──
   const acceptFile = useCallback(async (f: File) => {
-    if (f.type !== "application/pdf") { toast.error("Please upload a PDF file"); return; }
+    const ext = f.name.split(".").pop()?.toLowerCase();
+    const allowed = ["pdf", "docx", "pptx", "txt", "md", "png", "jpg", "jpeg", "webp"];
+    if (!ext || !allowed.includes(ext)) {
+      toast.error("Unsupported file format. Please upload .pdf, .docx, .pptx, .txt, .md, or images.");
+      return;
+    }
     setPreloadedSource(null);
     setFile(f);
     setPageCount(null);
-    setLoadingPageCount(true);
-    try {
-      const count = await pdfService.getPDFPageCount(f);
-      setPageCount(count);
-      setStartPage(1);
-      setEndPage(count);
-    } catch {
-      // Non-fatal — user can still generate without a range picker
-    } finally {
-      setLoadingPageCount(false);
+    if (ext === "pdf") {
+      setLoadingPageCount(true);
+      try {
+        const count = await pdfService.getPDFPageCount(f);
+        setPageCount(count);
+        setStartPage(1);
+        setEndPage(count);
+      } catch {
+        // Non-fatal — user can still generate without a range picker
+      } finally {
+        setLoadingPageCount(false);
+      }
     }
     toast.success(`"${f.name}" ready`);
   }, []);
@@ -830,7 +842,7 @@ export function Generate() {
         await new Promise(r => setTimeout(r, 300));
       } else {
         setStage("extracting");
-        pdfText = await pdfService.extractTextFromPDF(file!, (msg) => {
+        pdfText = await extractTextFromFile(file!, (msg) => {
           console.log('[extraction]', msg);
           if (msg.toLowerCase().includes('ocr')) setOcrActive(true);
         }, startPage, endPage);
@@ -959,7 +971,7 @@ export function Generate() {
                       ? "bg-[#527D6F] text-[#D5E2D6] shadow"
                       : "text-[#94B49C] hover:text-[#D5E2D6] hover:bg-[rgba(82,125,111,0.06)]"}`}
                 >
-                  <File className="w-3.5 h-3.5" /> PDF Textbook
+                  <File className="w-3.5 h-3.5" /> Study Material / File
                 </button>
                 <button
                   type="button"
@@ -1048,9 +1060,9 @@ export function Generate() {
                   ) : (
                     <>
                       <UploadCloud className="w-12 h-12 text-[#527D6F] mb-4 fm-float" />
-                      <p className="text-sm font-medium text-[#D5E2D6] mb-1">Drop your PDF here</p>
-                      <p className="text-xs text-[#527D6F]">or click to browse · up to 50 MB</p>
-                      <input id="fm-file-input" type="file" accept=".pdf" className="sr-only" onChange={onInputChange} />
+                      <p className="text-sm font-medium text-[#D5E2D6] mb-1">Drop your file here</p>
+                      <p className="text-xs text-[#527D6F]">Supports PDF, DOCX, PPTX, TXT, MD, or Images</p>
+                      <input id="fm-file-input" type="file" accept=".pdf,.docx,.pptx,.txt,.md,.png,.jpg,.jpeg,.webp" className="sr-only" onChange={onInputChange} />
                     </>
                   )}
                 </div>
@@ -1161,7 +1173,7 @@ export function Generate() {
                 )}
               </div>
             ) : (
-              <div className="space-y-4 fm-fadein">
+              <div className="space-y-6 fm-fadein">
                 <div>
                   <Label className="text-xs font-semibold text-[#94B49C] mb-1.5 block tracking-wide uppercase">
                     Topic / Guidelines Prompt
@@ -1183,6 +1195,40 @@ export function Generate() {
                   </div>
                 </div>
 
+                {/* Paper settings directly inside Step 1 in prompt mode */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 pt-4 border-t border-[rgba(148,180,156,0.12)]">
+                  {[
+                    { label: "Paper Title",    value: paperTitle, set: setPaperTitle, placeholder: "Mid-Term Exam"  },
+                    { label: "Subject",        value: subject,    set: setSubject,    placeholder: "Biology 101"    },
+                    { label: "Duration (min)", value: duration,   set: setDuration,   placeholder: "120", type: "number" },
+                  ].map(f => (
+                    <div key={f.label}>
+                      <Label className="text-xs font-semibold text-[#94B49C] mb-1.5 block tracking-wide uppercase">{f.label}</Label>
+                      <input type={f.type || "text"} value={f.value}
+                        onChange={e => f.set(e.target.value)} placeholder={f.placeholder}
+                        className="fm-input w-full h-9 rounded-lg px-3 text-sm" />
+                    </div>
+                  ))}
+                  <div>
+                    <Label className="text-xs font-semibold text-[#94B49C] mb-1.5 block tracking-wide uppercase">Academic Level</Label>
+                    <select value={academicLevel} onChange={e => setAcademicLevel(e.target.value)} className="fm-select w-full h-9">
+                      <option>Elementary School</option>
+                      <option>Middle School</option>
+                      <option>High School</option>
+                      <option>Undergraduate (College)</option>
+                      <option>Graduate / Professional</option>
+                    </select>
+                  </div>
+                  <div>
+                    <Label className="text-xs font-semibold text-[#94B49C] mb-1.5 block tracking-wide uppercase">Exam Board / Style</Label>
+                    <select value={institutionStyle} onChange={e => setInstitutionStyle(e.target.value as any)} className="fm-select w-full h-9">
+                      <option value="standard">Standard Style</option>
+                      <option value="cbse">CBSE Board</option>
+                      <option value="tn_matric">Tamil Nadu Matriculation</option>
+                    </select>
+                  </div>
+                </div>
+
                 {/* Local AI warning */}
                 {!lmEnabled && (
                   <div className="rounded-xl p-3.5 text-xs flex gap-3 fm-fadein"
@@ -1200,17 +1246,23 @@ export function Generate() {
             )}
 
             <div className="flex justify-end">
-              <button
-                disabled={
-                  (generationMode === "pdf" && !file && !preloadedSource) ||
-                  (generationMode === "prompt" && (customPrompt.trim().length < 10 || !lmEnabled))
-                }
-                onClick={() => setStep(2)}
-                className={`fm-btn-primary flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-semibold
-                  disabled:opacity-40 disabled:cursor-not-allowed`}
-              >
-                Next <ArrowRight className="w-4 h-4" />
-              </button>
+              {generationMode === "pdf" ? (
+                <button
+                  disabled={!file && !preloadedSource}
+                  onClick={() => setStep(2)}
+                  className="fm-btn-primary flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-semibold disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  Next <ArrowRight className="w-4 h-4" />
+                </button>
+              ) : (
+                <button
+                  disabled={customPrompt.trim().length < 10 || !lmEnabled}
+                  onClick={handleGenerate}
+                  className="fm-btn-primary flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-semibold disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  <Sparkles className="w-4 h-4" /> Generate Question Paper
+                </button>
+              )}
             </div>
           </div>
         )}

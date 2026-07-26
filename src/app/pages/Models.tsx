@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import * as pdfService from "../services/pdfService";
+import { extractTextFromFile } from "../services/fileExtractionService";
 import { getLMStudioConfig, learnBlueprintFromPaper } from "../services/lmStudioService";
 import { 
   getTemplates, saveTemplate, deleteTemplate, 
@@ -68,10 +69,14 @@ export function ModelsPage() {
     e.preventDefault();
     setIsDragging(false);
     const dropped = e.dataTransfer.files?.[0];
-    if (dropped && dropped.type === "application/pdf") {
-      setFile(dropped);
-    } else {
-      toast.error("Please drop a valid PDF file");
+    if (dropped) {
+      const ext = dropped.name.split(".").pop()?.toLowerCase();
+      const allowed = ["pdf", "docx", "pptx", "txt", "md", "png", "jpg", "jpeg", "webp"];
+      if (ext && allowed.includes(ext)) {
+        setFile(dropped);
+      } else {
+        toast.error("Unsupported file format. Please upload .pdf, .docx, .pptx, .txt, .md, or images.");
+      }
     }
   };
 
@@ -82,13 +87,13 @@ export function ModelsPage() {
       setStage("extracting");
       setOcrActive(false);
       
-      const pdfText = await pdfService.extractTextFromPDF(file, (msg) => {
+      const pdfText = await extractTextFromFile(file, (msg) => {
         console.log('[extraction-model-page]', msg);
         if (msg.toLowerCase().includes('ocr')) setOcrActive(true);
       });
 
       if (!pdfText.trim()) {
-        throw new Error("No readable text found in PDF. Ensure it is a valid PDF.");
+        throw new Error("No readable text found. Ensure the file contains text or clear handwriting/print.");
       }
 
       setStage("analysing");
@@ -381,10 +386,14 @@ function LearnModelModal({
     e.preventDefault();
     setIsDragging(false);
     const dropped = e.dataTransfer.files?.[0];
-    if (dropped && dropped.type === "application/pdf") {
-      setFile(dropped);
-    } else {
-      toast.error("Please drop a valid PDF file");
+    if (dropped) {
+      const ext = dropped.name.split(".").pop()?.toLowerCase();
+      const allowed = ["pdf", "docx", "pptx", "txt", "md", "png", "jpg", "jpeg", "webp"];
+      if (ext && allowed.includes(ext)) {
+        setFile(dropped);
+      } else {
+        toast.error("Unsupported file format. Please upload .pdf, .docx, .pptx, .txt, .md, or images.");
+      }
     }
   };
 
@@ -395,13 +404,13 @@ function LearnModelModal({
       setStage("extracting");
       setOcrActive(false);
       
-      const pdfText = await pdfService.extractTextFromPDF(file, (msg) => {
+      const pdfText = await extractTextFromFile(file, (msg) => {
         console.log('[extraction-model-page-modal]', msg);
         if (msg.toLowerCase().includes('ocr')) setOcrActive(true);
       });
 
       if (!pdfText.trim()) {
-        throw new Error("No readable text found in PDF. Ensure it is a valid PDF.");
+        throw new Error("No readable text found. Ensure the file contains text or clear handwriting/print.");
       }
 
       setStage("analysing");
@@ -471,7 +480,7 @@ function LearnModelModal({
           {stage === "upload" && (
             <div className="space-y-4">
               <p className="text-xs text-[#94B49C]">
-                Upload a past exam paper PDF (from any school or board). The local AI will extract its exact section structures, question counts, marks, difficulty, and school-specific styling guidelines to save as a reusable template.
+                Upload a past exam paper (from any school or board). Supported formats: .pdf, .docx, .pptx, .txt, .md, .png, .jpg, .jpeg, .webp. The local AI will extract its exact section structures, question counts, marks, difficulty, and school-specific styling guidelines to save as a reusable template.
               </p>
 
               {!lmEnabled && (
@@ -504,17 +513,17 @@ function LearnModelModal({
                     <input
                       type="file"
                       id="past-paper-file-page"
-                      accept="application/pdf"
+                      accept=".pdf,.docx,.pptx,.txt,.md,.png,.jpg,.jpeg,.webp"
                       onChange={(e) => setFile(e.target.files?.[0] || null)}
                       className="hidden"
                     />
                     <label htmlFor="past-paper-file-page" className="cursor-pointer flex flex-col items-center text-center">
                       <UploadCloud className="w-10 h-10 text-[#94B49C] mb-3 opacity-80" />
                       <span className="text-sm font-semibold text-[#D5E2D6] block mb-1">
-                        {file ? file.name : "Drag & drop past paper PDF here"}
+                        {file ? file.name : "Drag & drop past paper here"}
                       </span>
                       <span className="text-xs text-[#94B49C]">
-                        {file ? `${(file.size / (1024 * 1024)).toFixed(2)} MB` : "or click to browse computer"}
+                        {file ? `${(file.size / (1024 * 1024)).toFixed(2)} MB` : "or click to browse computer · supports documents and images"}
                       </span>
                     </label>
                   </div>

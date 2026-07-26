@@ -1,5 +1,5 @@
 {
-  "name": "question-paper-generator",
+  "name": "evalix",
   "version": "1.0.0",
   "description": "An intelligent web application that generates customized question papers from PDF textbooks using AI",
   "type": "module",
@@ -16,7 +16,7 @@
     "react",
     "typescript"
   ],
-  "author": "Question Paper Generator Team",
+  "author": "EVALIX Team",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -74,6 +74,7 @@
     "html2canvas": "^1.4.1",
     "input-otp": "1.4.2",
     "jspdf": "^4.2.1",
+    "jszip": "^3.10.1",
     "katex": "^0.17.0",
     "lucide-react": "0.487.0",
     "motion": "12.23.24",
@@ -100,6 +101,7 @@
   },
   "devDependencies": {
     "@tailwindcss/vite": "4.1.12",
+    "@types/jszip": "^3.4.0",
     "@vitejs/plugin-react": "4.7.0",
     "tailwindcss": "4.1.12",
     "vite": "^6.4.2"
